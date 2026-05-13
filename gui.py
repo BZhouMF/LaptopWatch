@@ -78,6 +78,7 @@ class AppLauncher(tk.Tk):
         self.session_id = None
         self._qid_log_count = 0  # 已从 qid 拉取的日志数量，用于增量同步
         self._push_queue = queue.Queue()  # 日志推送队列，后台线程消费
+        self._session_logs_lock = threading.Lock()  # 保护 session_logs 跨线程访问
         self._start_push_worker()
 
         # 创建日志目录
@@ -617,6 +618,10 @@ class AppLauncher(tk.Tk):
 
         if not is_any_media_mode:
             self.media_dir_var.set('')
+            self.sort_type_var.set('name')
+            self.sort_order_var.set('asc')
+            self.sort_type_combo.current(0)
+            self.sort_order_combo.current(0)
             self.random_var.set(False)
             self.douyin_random_media_var.set(False)
 
@@ -972,7 +977,7 @@ class AppLauncher(tk.Tk):
                 if not is_port_running:
                     self._reset_after_stop()
             elif not is_port_running and not is_internal_alive:
-                if str(self.stop_btn['state']) == 'normal':
+                if self.stop_btn.instate(['normal']):
                     # 防抖：Flask reloader 重启期间端口会短暂空闲，
                     # 连续 2 次检测都空闲（约 4 秒）才认为真正停止
                     debounce = getattr(self, '_stop_debounce', 0) + 1
@@ -1040,7 +1045,8 @@ class AppLauncher(tk.Tk):
         """将 UI 和状态恢复到未运行状态（不保存日志，不杀进程）"""
         self.process = None
         self.process_pid = None
-        self.session_logs = []
+        with self._session_logs_lock:
+            self.session_logs = []
         self.session_start_time = None
         self.session_id = None
         self._external_synced = False
@@ -1060,9 +1066,10 @@ class AppLauncher(tk.Tk):
         self.log_text.insert('end', text + '\n')
         self.log_text.see('end')
         self.log_text.config(state='disabled')
-        self.session_logs.append(text)
-        if len(self.session_logs) > 2000:
-            self.session_logs.pop(0)
+        with self._session_logs_lock:
+            self.session_logs.append(text)
+            if len(self.session_logs) > 2000:
+                self.session_logs.pop(0)
         self._update_activity_display(text)
         # 当 gui 持有服务进程时，将日志推送到 qid.py 以便网页端同步显示
         if self.process is not None and self.process.poll() is None:

@@ -169,10 +169,20 @@ def download_folder():
                 os.unlink(zip_path)
             except Exception as e:
                 logger.debug(f"清理临时文件失败 {zip_path}: {e}")
-                pass
             return response
+
         folder_name = os.path.basename(abs_path)
-        return send_file(zip_path, as_attachment=True, download_name=f'{folder_name}.zip', mimetype='application/zip')
+        try:
+            return send_file(zip_path, as_attachment=True,
+                             download_name=f'{folder_name}.zip',
+                             mimetype='application/zip')
+        except Exception:
+            # send_file 失败（如客户端断连），立即清理，防止临时文件残留
+            try:
+                os.unlink(zip_path)
+            except Exception:
+                pass
+            raise
     except Exception as e:
         log_exception(request, 'DOWNLOAD_FOLDER', folder_path, e)
         return "文件夹下载失败", 500
@@ -254,10 +264,18 @@ def download_selected():
                 os.unlink(zip_path)
             except Exception as e:
                 logger.debug(f"清理临时文件失败 {zip_path}: {e}")
-                pass
             return response
         folder_name = os.path.basename(base_abs) + '_下载' if base_abs else '下载'
-        return send_file(zip_path, as_attachment=True, download_name=f'{folder_name}.zip', mimetype='application/zip')
+        try:
+            return send_file(zip_path, as_attachment=True,
+                             download_name=f'{folder_name}.zip',
+                             mimetype='application/zip')
+        except Exception:
+            try:
+                os.unlink(zip_path)
+            except Exception:
+                pass
+            raise
     except Exception as e:
         log_exception(request, 'DOWNLOAD_SELECTED', base, e)
         return "批量下载失败", 500
