@@ -15,9 +15,6 @@ from blueprints.auth import login_required, require_mode
 
 file_bp = Blueprint('file_api', __name__, url_prefix='/file')
 
-@file_bp.route('/raw/<path:filepath>')
-@login_required
-@require_mode('normal')
 def _resolve_file_path(raw_path):
     """解析并校验文件路径，返回 (规范路径, None) 或 (None, 错误响应)"""
     decoded = urllib.parse.unquote(raw_path)
@@ -27,6 +24,9 @@ def _resolve_file_path(raw_path):
     return real_path, None, None
 
 
+@file_bp.route('/raw/<path:filepath>')
+@login_required
+@require_mode('normal')
 def serve_raw(filepath):
     """原始文件预览"""
     start_time = time.time()
