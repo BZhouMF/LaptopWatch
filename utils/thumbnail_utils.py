@@ -116,6 +116,3 @@ def log_thumbnail_backend_status():
         logger.info('OpenCV 可用，视频缩略图将使用 OpenCV')
     else:
         logger.warning('[ERROR] OpenCV 不可用，视频缩略图功能不可用')
-
-# 初始化时记录状态
-log_thumbnail_backend_status()
