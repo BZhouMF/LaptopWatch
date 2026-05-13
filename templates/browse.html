@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件浏览</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <!-- 侧边栏切换按钮 -->
+    <button id="sidebarToggle" class="sidebar-toggle" title="控制面板">☰</button>
+
+    <!-- 侧边栏遮罩 -->
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+
+    <!-- 侧边栏 -->
+    <div id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+            <span>控制面板</span>
+        </div>
+        <div class="sidebar-content">
+            <div class="controls">
+                <div class="control-group">
+                    <a href="/" class="btn btn-secondary"> 首页</a>
+                    <button id="refreshBtn" class="btn" onclick="refreshCurrentDir()"> 刷新</button>
+                    <button id="downloadBtn" class="btn btn-secondary" onclick="toggleSelectionMode()"> 下载</button>
+                </div>
+                <div class="control-group">
+                    <button id="backPageBtn" class="btn" onclick="goBackPage()"> 返回上一页</button>
+                    <a href="{{ parent_link }}" class="btn">{{ btn_text }}</a>
+                </div>
+                <div class="control-group">
+                    <select id="viewSelect" onchange="changeView()">
+                        <option value="large">大图标</option>
+                        <option value="medium">中图标</option>
+                        <option value="small">小图标</option>
+                        <option value="list">详细信息</option>
+                    </select>
+                    <select id="sortSelect" onchange="changeSort()">
+                        <option value="name">按名称</option>
+                        <option value="date">按时间</option>
+                        <option value="size">按大小</option>
+                    </select>
+                    <button id="orderToggle" class="btn" onclick="toggleOrder()"> 升序</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="browse-main">
+        <h1>{{ abs_path }}</h1>
+
+    <!-- 文件夹容器 -->
+    <div id="folderContainer" class="view-container"></div>
+    <!-- 文件容器（包含表头） -->
+    <div id="fileContainer" class="view-container">
+        <div id="listHeader" class="header" style="display:none;">
+            <!-- <div class="col-checkbox"></div> -->
+            <!-- <div class="col-icon"></div> -->
+
+        </div>
+    </div>
+
+    <!-- 错误信息区域 -->
+    <div id="errorMsg" class="error-msg" style="display:none;"></div>
+    <!-- 空状态提示区域 -->
+    <div id="emptyMsg" class="empty-msg" style="display:none;"> 此文件夹为空</div>
+    <!-- 加载指示器 -->
+    <div id="loader" class="loader">正在加载...</div>
+    <!-- 结束提示 -->
+    <div id="endMsg" class="end-msg" style="display:none;">已加载全部</div>
+
+    <!-- 底部选择栏（多选模式时显示） -->
+    <div id="selectionBar" class="selection-bar" style="display: none;">
+        <div class="selection-info">
+            <span id="selectedCount">0</span> 个项目已选中
+        </div>
+        <div class="selection-options">
+            <label><input type="radio" name="downloadMode" value="merge" checked> 合并下载</label>
+            <label><input type="radio" name="downloadMode" value="separate"> 分别下载</label>
+        </div>
+        <div class="selection-buttons">
+            <button class="btn" onclick="selectAll()">全选</button>
+            <button class="btn" onclick="cancelSelection()">取消</button>
+            <button class="btn btn-primary" onclick="downloadSelected()">确定下载</button>
+        </div>
+    </div>
+
+    </div><!-- /.browse-main -->
+
+    <div id="previewModal" class="modal" onclick="closeModal()">
+        <span class="modal-close">&times;</span>
+        <div id="modalContent"></div>
+        <a id="modalDownload" class="modal-download" href="#" download>下载原文件</a>
+        <div id="modalTip" class="modal-tip"></div>
+    </div>
+
+    <script>window.ROUTES = {{ ROUTES | tojson }};</script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script>
+        const absPath = {{ abs_path | tojson }};
+        const MAX_HISTORY_LENGTH = {{ MAX_HISTORY_LENGTH }};
+    </script>
+    <script src="{{ url_for('static', filename='js/browse.js') }}"></script>
+</body>
+</html>

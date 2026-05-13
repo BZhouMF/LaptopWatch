@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ category_info.folder_name }} - {{ '视频模式' if config.RUN_MODE == 'video' else '图片模式' }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .category-header {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+        .back-btn {
+            padding: 6px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-primary);
+            margin-right: 14px;
+        }
+        .back-btn:hover {
+            background: var(--surface-hover);
+        }
+        .category-header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0;
+        }
+        .category-section {
+            margin-bottom: 28px;
+        }
+        .category-title-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .category-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .show-more-btn {
+            padding: 4px 12px;
+            background: var(--primary-color);
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            text-decoration: none;
+        }
+        .show-more-btn:hover {
+            background: var(--primary-dark);
+        }
+        .category-empty {
+            color: var(--text-muted);
+            font-size: 14px;
+            padding: 8px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 页面头部 -->
+    <div class="category-header">
+        {% if not is_homepage %}
+        <a href="{{ '/category/browse/' + parent_path if parent_path else '/' }}" class="back-btn">&larr; 返回</a>
+        {% endif %}
+        <h1>{{ category_info.folder_name }}</h1>
+    </div>
+
+    <!-- 分类区块 -->
+    {% for cat in category_info.categories %}
+    <div class="category-section">
+        <div class="category-title-bar">
+            <span class="category-title">{{ cat.name }}</span>
+            <a href="{{ '/category/browse/' + cat.path }}" class="show-more-btn">显示更多</a>
+        </div>
+        <div class="video-grid">
+            {% for item in cat.files %}
+            <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
+                <div class="video-thumb">
+                    {% if item.is_video or item.is_image %}
+                    <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path }}" alt="{{ item.name }}" loading="lazy">
+                    {% endif %}
+                </div>
+                <div class="video-info">
+                    <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- 根目录文件区 -->
+    {% if category_info.root_files %}
+    <div class="category-section">
+        <div class="category-title-bar">
+            <span class="category-title">{{ category_info.folder_name }} / 文件</span>
+        </div>
+        <div class="video-grid">
+            {% for item in category_info.root_files %}
+            <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
+                <div class="video-thumb">
+                    {% if item.is_video or item.is_image %}
+                    <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path }}" alt="{{ item.name }}" loading="lazy">
+                    {% endif %}
+                </div>
+                <div class="video-info">
+                    <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if not category_info.categories and not category_info.root_files %}
+    <div class="category-empty">该目录下没有可展示的内容。</div>
+    {% endif %}
+
+    <script>window.ROUTES = {{ ROUTES | tojson }};</script>
+    <script>
+        function openMedia(relativePath) {
+            window.location.href = window.ROUTES.mediaPlayer + '?path=' + encodeURIComponent(relativePath);
+        }
+    </script>
+</body>
+</html>

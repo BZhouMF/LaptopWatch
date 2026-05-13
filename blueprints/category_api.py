@@ -1,0 +1,243 @@
+"""
+目录浏览模式API蓝图
+提供分类区块展示接口
+"""
+import os
+import time
+import urllib.parse
+from pathlib import Path
+from flask import Blueprint, request, jsonify, render_template, redirect
+from config import config
+from utils.logging_utils import log_access, log_exception, logger
+from utils.media_utils import get_category_children_info, get_files_in_folder, check_browse_would_redirect
+from blueprints.auth import login_required, require_mode
+
+category_bp = Blueprint('category', __name__, url_prefix='/category')
+
+
+def _get_lazy_page_files(folder_path, offset, limit, run_mode):
+    """惰性获取分页文件，不统计总数。
+    使用 get_files_in_folder（带缓存）避免重复扫描磁盘。
+    返回 (formatted_files, has_more)
+    """
+    all_files = get_files_in_folder(folder_path)
+    page_raw = all_files[offset:offset + limit]
+    has_more = (offset + limit) < len(all_files)
+
+    target_ext_video = config.VIDEO_EXT
+    target_ext_image = config.IMAGE_EXT
+
+    formatted = []
+    for f in page_raw:
+        rel_path = f['rel_path'].replace('\\', '/')
+        if not rel_path or rel_path == '.':
+            rel_path = f['name']
+        formatted.append({
+            'name': f['name'],
+            'relative_path': rel_path,
+            'is_video': f['name'].lower().endswith(tuple(target_ext_video)),
+            'is_image': f['name'].lower().endswith(tuple(target_ext_image)),
+        })
+
+    return formatted, has_more
+
+
+@category_bp.route('/data')
+@login_required
+@require_mode('video', 'image')
+def category_data():
+    """
+    JSON API: 获取某路径下的分类结构数据。
+    Query params: path=相对路径（空=根目录）
+    """
+    start_time = time.time()
+    try:
+        folder_rel_path = request.args.get('path', '')
+        if folder_rel_path:
+            folder_rel_path = urllib.parse.unquote(folder_rel_path)
+            full_path = (config.MEDIA_DIR / folder_rel_path).resolve()
+            if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
+                return jsonify({'code': 1, 'msg': '非法访问'}), 403
+        else:
+            full_path = config.MEDIA_DIR
+
+        if not full_path or not full_path.exists() or not full_path.is_dir():
+            return jsonify({'code': 1, 'msg': '目录不存在'}), 404
+
+        info = get_category_children_info(
+            str(full_path), config.RUN_MODE,
+            random_mode=config.RANDOM_MODE
+        )
+
+        return jsonify({'code': 0, 'data': info})
+    except Exception as e:
+        logger.error(f"category_data 错误: {e}", exc_info=True)
+        return jsonify({'code': 1, 'msg': str(e)}), 500
+    finally:
+        log_access(request, 'CATEGORY_DATA', request.args.get('path', ''),
+                   duration=time.time() - start_time)
+
+
+@category_bp.route('/browse/<path:folder_path>')
+@login_required
+@require_mode('video', 'image')
+def category_browse(folder_path):
+    """
+    进入子文件夹。
+    如果有子文件夹 → 渲染分类页面
+    如果是叶子 → 跳转到网格页面
+    """
+    start_time = time.time()
+    try:
+        decoded_path = urllib.parse.unquote(folder_path)
+        full_path = (config.MEDIA_DIR / decoded_path).resolve()
+
+        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
+            return '非法访问', 403
+        if not full_path.exists() or not full_path.is_dir():
+            return '目录不存在', 404
+
+        # 检查是否有子文件夹
+        has_subfolders = False
+        try:
+            with os.scandir(str(full_path)) as entries:
+                for entry in entries:
+                    if entry.is_dir():
+                        has_subfolders = True
+                        break
+        except Exception:
+            # scandir 失败则视为无子文件夹，不影响后续处理
+            pass
+
+        # 计算父路径用于返回按钮
+        parent_rel = os.path.relpath(str(full_path.parent), str(config.MEDIA_DIR))
+        parent_path = parent_rel.replace('\\', '/')
+        if parent_path == '.':
+            parent_path = ''
+
+        folder_rel = decoded_path.replace('\\', '/')
+
+        if has_subfolders:
+            # 有子文件夹 → 分类页面
+            info = get_category_children_info(
+                str(full_path), config.RUN_MODE,
+                random_mode=config.RANDOM_MODE
+            )
+
+            # 兜底规则：只有一个分类有文件且无根文件 → 直接跳转到网格页面
+            if info.get('single_leaf_override') and info['total_categories'] == 1:
+                only_cat = info['categories'][0]
+                return redirect(f'/category/grid/{only_cat["path"]}?from_override=1')
+
+            return render_template('category_index.html',
+                                   category_info=info,
+                                   parent_path=parent_path,
+                                   current_path=folder_rel,
+                                   is_homepage=False)
+        else:
+            # 叶子 → 网格页面
+            return redirect(f'/category/grid/{folder_rel}?from_override=1')
+
+    except Exception as e:
+        logger.error(f"category_browse 错误: {e}", exc_info=True)
+        return '加载失败', 500
+    finally:
+        log_access(request, 'CATEGORY_BROWSE', folder_path,
+                   duration=time.time() - start_time)
+
+
+@category_bp.route('/grid/<path:folder_path>')
+@login_required
+@require_mode('video', 'image')
+def category_grid(folder_path):
+    """叶子文件夹的网格页面（36 个/页）"""
+    start_time = time.time()
+    try:
+        decoded_path = urllib.parse.unquote(folder_path)
+        full_path = (config.MEDIA_DIR / decoded_path).resolve()
+
+        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
+            return '非法访问', 403
+        if not full_path.exists() or not full_path.is_dir():
+            return '目录不存在', 404
+
+        page_size = config.CATEGORY_DETAIL_PAGE_SIZE
+        files, has_more = _get_lazy_page_files(
+            str(full_path), 0, page_size, config.RUN_MODE
+        )
+
+        # 计算父路径
+        parent_rel = os.path.relpath(str(full_path.parent), str(config.MEDIA_DIR))
+        parent_path = parent_rel.replace('\\', '/')
+        if parent_path == '.':
+            parent_path = ''
+
+        # 来自兜底/叶子重定向时，向上查找第一个不会触发循环的父级
+        hide_back = False
+        if request.args.get('from_override', '0') == '1':
+            check_path = full_path.parent
+            while True:
+                if str(check_path.resolve()) == str(config.MEDIA_DIR.resolve()):
+                    parent_path = ''
+                    if check_browse_would_redirect(config.MEDIA_DIR):
+                        hide_back = True
+                    break
+
+                if check_browse_would_redirect(check_path):
+                    check_path = check_path.parent
+                else:
+                    parent_rel = os.path.relpath(str(check_path), str(config.MEDIA_DIR))
+                    parent_path = parent_rel.replace('\\', '/')
+                    if parent_path == '.':
+                        parent_path = ''
+                    break
+
+        return render_template('category_grid.html',
+                               files=files,
+                               folder_name=full_path.name,
+                               folder_path=decoded_path.replace('\\', '/'),
+                               parent_path=parent_path,
+                               hide_back=hide_back,
+                               page_size=page_size,
+                               has_more=has_more)
+    except Exception as e:
+        logger.error(f"category_grid 错误: {e}", exc_info=True)
+        return '加载失败', 500
+    finally:
+        log_access(request, 'CATEGORY_GRID', folder_path,
+                   duration=time.time() - start_time)
+
+
+@category_bp.route('/grid_more')
+@login_required
+@require_mode('video', 'image')
+def category_grid_more():
+    """叶子文件夹加载更多（JSON API，惰性分页，不统计总数）"""
+    start_time = time.time()
+    try:
+        folder_path = request.args.get('path', '')
+        offset = int(request.args.get('offset', 0))
+        limit = int(request.args.get('limit', config.PAGE_LOAD))
+
+        decoded_path = urllib.parse.unquote(folder_path)
+        full_path = (config.MEDIA_DIR / decoded_path).resolve()
+
+        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
+            return jsonify({'code': 1, 'msg': '非法访问'}), 403
+
+        files, has_more = _get_lazy_page_files(
+            str(full_path), offset, limit, config.RUN_MODE
+        )
+
+        return jsonify({
+            'code': 0,
+            'data': files,
+            'has_more': has_more,
+            'next_offset': offset + len(files)
+        })
+    except Exception as e:
+        logger.error(f"category_grid_more 错误: {e}", exc_info=True)
+        return jsonify({'code': 1, 'msg': str(e)}), 500
+    finally:
+        log_access(request, 'CATEGORY_GRID_MORE', request.args.get('path', ''),
+                   duration=time.time() - start_time)

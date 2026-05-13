@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ '视频模式' if config.RUN_MODE == 'video' else '图片模式' }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px 0;
+            gap: 10px;
+        }
+        .page-btn {
+            padding: 8px 16px;
+            background-color: #4361ee;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .page-btn:hover:not(:disabled) {
+            background-color: #3a56d4;
+        }
+        .page-btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .page-numbers {
+            display: flex;
+            gap: 5px;
+        }
+        .page-number {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .page-number:hover {
+            background-color: #f0f0f0;
+        }
+        .page-number.current {
+            background-color: #4361ee;
+            color: white;
+            border-color: #4361ee;
+        }
+        .page-number.disabled {
+            background-color: #f0f0f0;
+            color: #999;
+            cursor: not-allowed;
+            border-color: #e0e0e0;
+        }
+        .page-dots {
+            padding: 6px 6px;
+            color: #666;
+        }
+        .loading-placeholder {
+            opacity: 0.7;
+        }
+        .loading-placeholder .thumb-placeholder.loading {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            width: 100%;
+            height: 150px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: transparent;
+        }
+        .loading-placeholder .loading-text {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            height: 16px;
+            border-radius: 4px;
+            margin: 4px 0;
+        }
+        .loading-placeholder .video-name.loading-text {
+            width: 80%;
+            height: 20px;
+        }
+        .loading-placeholder .video-meta.loading-text {
+            width: 40%;
+            height: 14px;
+        }
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="mediaGrid" class="video-grid">
+        {% for item in media_list %}
+        <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
+            <div class="video-thumb">
+                {% if item.is_video or item.is_image %}
+                    <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path }}" alt="{{ item.name }}" loading="lazy">
+                {% else %}
+                    <div class="thumb-placeholder">{{ 'VID' if item.is_video else 'IMG' }}</div>
+                {% endif %}
+            </div>
+            <div class="video-info">
+                <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="pagination" id="pagination">
+        <button id="prevPage" class="page-btn" onclick="changePage(currentPage - 1)" disabled>上一页</button>
+        <div class="page-numbers" id="pageNumbers"></div>
+        <button id="nextPage" class="page-btn" onclick="changePage(currentPage + 1)" {% if not has_more %}disabled{% endif %}>下一页</button>
+    </div>
+
+    <div class="loading" id="loading">加载中...</div>
+    <div class="no-more" id="noMore" style="display: none;">没有更多了</div>
+
+    <script>window.ROUTES = {{ ROUTES | tojson }};</script>
+    <script>
+        var MEDIA_CONFIG = {
+            pageFirst: {{ page_first }},
+            pageLoad: {{ page_load }},
+            hasMore: {{ has_more|tojson|safe }},
+            totalPages: {{ total_pages }},
+            currentPage: {{ current_page }},
+            isRandom: {{ config.RANDOM_MODE|tojson|safe }},
+            isTraversal: {{ is_traversal|tojson|safe }}
+        };
+        var MEDIA_PAGE_CACHE = {};
+        MEDIA_PAGE_CACHE[1] = {
+            data: [{% for item in media_list %}{
+                relative_path: {{ item.relative_path|tojson|safe }},
+                name: {{ item.name|tojson|safe }},
+                is_video: {{ item.is_video|tojson|safe }},
+                is_image: {{ item.is_image|tojson|safe }}
+            }{% if not loop.last %},{% endif %}{% endfor %}],
+            hasMore: {{ has_more|tojson|safe }}
+        };
+    </script>
+    <script src="{{ url_for('static', filename='js/media_index.js') }}"></script>
+</body>
+</html>
