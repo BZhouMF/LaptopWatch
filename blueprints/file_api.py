@@ -9,7 +9,7 @@ import zipfile
 import urllib.parse
 from flask import Blueprint, request, jsonify, render_template, send_file, after_this_request
 from config import config
-from utils.logging_utils import log_access, log_exception
+from utils.logging_utils import log_access, log_exception, logger
 from utils.file_utils import safe_send_file, sizeof_fmt
 from blueprints.auth import login_required, require_mode
 
@@ -168,7 +168,7 @@ def download_folder():
             try:
                 os.unlink(zip_path)
             except Exception as e:
-                print(f"[DEBUG] 清理临时文件失败 {zip_path}: {e}", flush=True)
+                logger.debug(f"清理临时文件失败 {zip_path}: {e}")
                 pass
             return response
         folder_name = os.path.basename(abs_path)
@@ -253,7 +253,7 @@ def download_selected():
             try:
                 os.unlink(zip_path)
             except Exception as e:
-                print(f"[DEBUG] 清理临时文件失败 {zip_path}: {e}", flush=True)
+                logger.debug(f"清理临时文件失败 {zip_path}: {e}")
                 pass
             return response
         folder_name = os.path.basename(base_abs) + '_下载' if base_abs else '下载'

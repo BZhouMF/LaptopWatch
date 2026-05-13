@@ -161,7 +161,6 @@ def init_traversal(root_path, run_mode):
     # 确保是Path对象
     if isinstance(root_path, str):
         root_path = Path(root_path)
-    print(f"[INFO] 初始化遍历: {root_path.name}, 模式={run_mode}", flush=True)
 
     # 清理超过 1 小时未活动的旧遍历
     stale_threshold = time.time() - 3600
@@ -178,7 +177,6 @@ def init_traversal(root_path, run_mode):
 
     if not root_subfolders:
         logger.info("根目录没有子文件夹，直接播放根目录")
-        print(f"[INFO] 根目录没有子文件夹，直接播放根目录", flush=True)
         traversal_id = str(uuid.uuid4())
         with _traversal_lock:
             _traversal_store[traversal_id] = {
@@ -195,7 +193,6 @@ def init_traversal(root_path, run_mode):
     # 有子文件夹，随机选一个根目录子文件夹作为起点
     start_root_idx = random.randint(0, len(root_subfolders) - 1)
     logger.info(f"随机选择第 {start_root_idx} 个根目录子文件夹: {root_subfolders[start_root_idx]['name']}")
-    print(f"[INFO] 随机选择起点根文件夹: {root_subfolders[start_root_idx]['name']}", flush=True)
 
     # 构建初始的文件夹遍历栈，记录同级文件夹信息，用于随机选择起点子文件夹
     start_root_folder = root_subfolders[start_root_idx]['path']
@@ -234,7 +231,6 @@ def init_traversal(root_path, run_mode):
     # 记录最终的起点文件夹
     start_leaf_folder = current_path
     logger.info(f"初始叶子文件夹: {start_leaf_folder}")
-    print(f"[INFO] 初始播放文件夹: {Path(start_leaf_folder).name}", flush=True)
 
     traversal_id = str(uuid.uuid4())
     with _traversal_lock:
@@ -476,7 +472,6 @@ def init_sequential_traversal(root_path, run_mode):
     target_ext = config.VIDEO_EXT if run_mode in ('video', 'douyin') else config.IMAGE_EXT
 
     logger.info(f"初始化顺序遍历: root={root_path}, mode={run_mode}")
-    print(f"[INFO] 初始化顺序遍历: {root_path.name}, 模式={run_mode}", flush=True)
 
     # 清理超过 1 小时未活动的旧遍历
     stale_threshold = time.time() - 3600

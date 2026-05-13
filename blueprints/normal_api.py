@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from flask import Blueprint, request, jsonify
 from config import config
-from utils.logging_utils import log_access, log_exception
+from utils.logging_utils import log_access, log_exception, logger
 from utils.file_utils import get_icon, sizeof_fmt
 from blueprints.auth import login_required, require_mode
 
@@ -30,7 +30,7 @@ def api_check_path():
             is_dir = os.path.isdir(decoded_path) if exists else False
             return jsonify({'exists': exists, 'is_dir': is_dir})
         except Exception as e:
-            print(f"[ERROR] 检查路径异常 {path}: {e}", flush=True)
+            logger.error(f"检查路径异常 {path}: {e}")
             return jsonify({'exists': False, 'is_dir': False})
     except Exception as e:
         log_exception(request, 'CHECK_PATH', path, e)
@@ -66,7 +66,7 @@ def api_list():
                                 stat = entry.stat(follow_symlinks=False)
                                 mtime = stat.st_mtime
                             except Exception as e:
-                                print(f"[WARN] 获取文件状态失败 {entry.path}: {e}", flush=True)
+                                logger.warning(f"获取文件状态失败 {entry.path}: {e}")
                                 mtime = 0
                             folders.append({
                                 'name': entry.name,
@@ -82,7 +82,7 @@ def api_list():
                                 mtime = stat.st_mtime
                                 size = stat.st_size
                             except Exception as e:
-                                print(f"[WARN] 获取文件状态失败 {entry.path}: {e}", flush=True)
+                                logger.warning(f"获取文件状态失败 {entry.path}: {e}")
                                 continue
                             files.append({
                                 'name': entry.name,
@@ -92,7 +92,7 @@ def api_list():
                                 'date': time.strftime('%Y-%m-%d %H:%M', time.localtime(mtime))
                             })
                     except Exception as e:
-                        print(f"[WARN] 处理文件条目失败 {entry.path if 'entry' in locals() else 'unknown'}: {e}", flush=True)
+                        logger.warning(f"处理文件条目失败 {entry.path if 'entry' in locals() else 'unknown'}: {e}")
                         continue
         except Exception as e:
             return jsonify({'error': f'无法读取目录: {str(e)}'}), 500
@@ -131,7 +131,7 @@ def api_list():
                     'size': sizeof_fmt(f['size'])
                 })
             except Exception as e:
-                print(f"[WARN] 处理文件项失败 {f['path'] if 'f' in locals() else 'unknown'}: {e}", flush=True)
+                logger.warning(f"处理文件项失败 {f['path'] if 'f' in locals() else 'unknown'}: {e}")
                 continue
         return jsonify({'items': items, 'has_more': offset + limit < total})
     except Exception as e:
@@ -164,7 +164,7 @@ def api_list_all():
                             'is_dir': entry.is_dir(follow_symlinks=False)
                         })
                     except Exception as e:
-                        print(f"[WARN] 扫描目录条目失败 {entry.path if 'entry' in locals() else 'unknown'}: {e}", flush=True)
+                        logger.warning(f"扫描目录条目失败 {entry.path if 'entry' in locals() else 'unknown'}: {e}")
                         continue
         except Exception as e:
             return jsonify({'error': f'无法读取目录: {str(e)}'}), 500
