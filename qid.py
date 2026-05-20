@@ -371,26 +371,29 @@ def _kill_gui():
         add_log(f'[KILL-ALL] 终止 gui.py 异常: {e}')
 
 def _kill_port_service(port, label):
-    """终止端口上的服务及其父进程"""
+    """终止端口上的服务及其父进程（避免误杀自身）"""
     pids = check_port(port)
     if not pids:
         add_log(f'[KILL-ALL] 端口{port}空闲，无需终止')
         return
     add_log(f'[KILL-ALL] 终止{label}，端口{port} PID: {",".join(pids)}')
+    current_pid = str(os.getpid())
     for pid in pids:
         root_pid = find_parent_pid(pid)
-        if root_pid:
-            add_log(f'[KILL-ALL] {label}: PID {pid} → 父进程 {root_pid}，树杀...')
+        if root_pid and root_pid != current_pid:
+            add_log(f'[KILL-ALL] {label}: PID {pid} → 父进程 {root_pid}，树杀父进程...')
             subprocess.run(
                 ['taskkill', '/F', '/T', '/PID', str(root_pid)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-        subprocess.run(
-            ['taskkill', '/F', '/PID', str(pid)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
+        else:
+            add_log(f'[KILL-ALL] {label}: 终止 PID {pid} 及其子进程树')
+            subprocess.run(
+                ['taskkill', '/F', '/T', '/PID', str(pid)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+            )
     force_kill_port(port, add_log)
     add_log(f'[KILL-ALL] {label} 已终止')
 
