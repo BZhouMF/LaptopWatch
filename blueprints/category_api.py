@@ -97,18 +97,6 @@ def category_browse(folder_path):
         if not full_path.exists() or not full_path.is_dir():
             return '目录不存在', 404
 
-        # 检查是否有子文件夹
-        has_subfolders = False
-        try:
-            with os.scandir(str(full_path)) as entries:
-                for entry in entries:
-                    if entry.is_dir():
-                        has_subfolders = True
-                        break
-        except Exception:
-            # scandir 失败则视为无子文件夹，不影响后续处理
-            pass
-
         # 计算父路径用于返回按钮
         parent_rel = os.path.relpath(str(full_path.parent), str(config.MEDIA_DIR))
         parent_path = parent_rel.replace('\\', '/')
@@ -117,26 +105,27 @@ def category_browse(folder_path):
 
         folder_rel = decoded_path.replace('\\', '/')
 
-        if has_subfolders:
-            # 有子文件夹 → 分类页面
-            info = get_category_children_info(
-                str(full_path), config.RUN_MODE,
-                random_mode=config.RANDOM_MODE
-            )
+        # 获取分类信息（内部已过滤空文件夹）
+        info = get_category_children_info(
+            str(full_path), config.RUN_MODE,
+            random_mode=config.RANDOM_MODE
+        )
 
-            # 兜底规则：只有一个分类有文件且无根文件 → 直接跳转到网格页面
-            if info.get('single_leaf_override') and info['total_categories'] == 1:
-                only_cat = info['categories'][0]
-                return redirect(f'/category/grid/{only_cat["path"]}?from_override=1')
+        # 兜底规则：只有一个分类有文件且无根文件 → 直接跳转到网格页面
+        if info.get('single_leaf_override') and info['total_categories'] == 1:
+            only_cat = info['categories'][0]
+            return redirect(f'/category/grid/{only_cat["path"]}?from_override=1')
 
+        # 有非空子文件夹 → 分类页面
+        if info['total_categories'] > 0:
             return render_template('category_index.html',
                                    category_info=info,
                                    parent_path=parent_path,
                                    current_path=folder_rel,
                                    is_homepage=False)
-        else:
-            # 叶子 → 网格页面
-            return redirect(f'/category/grid/{folder_rel}?from_override=1')
+
+        # 叶子或所有子文件夹均无媒体文件 → 网格页面
+        return redirect(f'/category/grid/{folder_rel}?from_override=1')
 
     except Exception as e:
         logger.error(f"category_browse 错误: {e}", exc_info=True)
