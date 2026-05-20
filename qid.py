@@ -348,27 +348,58 @@ def api_stop():
 
 # ==================== 终止全部服务 API ====================
 def _kill_gui():
-    """查找并终止 gui.py 进程（使用 PowerShell）"""
+    """查找并终止 gui.py 进程（wmic + PowerShell 双重保障）"""
+    killed_pids = set()
+
+    def _try_kill(pid):
+        if pid in killed_pids:
+            return
+        add_log(f'[KILL-ALL] 终止 GUI 进程，PID: {pid}')
+        subprocess.run(
+            ['taskkill', '/F', '/T', '/PID', str(pid)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        killed_pids.add(pid)
+
+    # 方法1: wmic（兼容所有 Windows 版本，无需 PowerShell）
+    try:
+        result = subprocess.run(
+            ['wmic', 'process', 'where',
+             'name="python.exe" or name="pythonw.exe" or name="python3.exe"',
+             'get', 'processid,commandline', '/format:csv'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        for line in result.stdout.split('\n'):
+            if 'gui.py' not in line and 'gui' not in line:
+                continue
+            parts = [p.strip() for p in line.split(',')]
+            for part in parts:
+                if part.isdigit():
+                    _try_kill(part)
+    except Exception as e:
+        add_log(f'[KILL-ALL] wmic 查找 gui.py 异常: {e}')
+
+    if killed_pids:
+        return
+
+    # 方法2: PowerShell Get-CimInstance（Windows 10+ 备选）
     try:
         result = subprocess.run(
             ['powershell', '-NoProfile', '-Command',
-             "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-             "Where-Object { $_.CommandLine -match 'gui.py' } | "
+             "Get-CimInstance Win32_Process | "
+             "Where-Object { $_.Name -like 'python*' -and $_.CommandLine -match 'gui' } | "
              "Select-Object -ExpandProperty ProcessId"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        for pid_line in result.stdout.strip().split('\n'):
-            pid = pid_line.strip()
+        for line in result.stdout.strip().split('\n'):
+            pid = line.strip()
             if pid.isdigit():
-                add_log(f'[KILL-ALL] 终止 gui.py，PID: {pid}')
-                subprocess.run(
-                    ['taskkill', '/F', '/T', '/PID', pid],
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3,
-                    creationflags=subprocess.CREATE_NO_WINDOW
-                )
+                _try_kill(pid)
     except Exception as e:
-        add_log(f'[KILL-ALL] 终止 gui.py 异常: {e}')
+        add_log(f'[KILL-ALL] PowerShell 查找 gui.py 异常: {e}')
 
 def _kill_port_service(port, label):
     """终止端口上的服务及其父进程（避免误杀自身）"""
