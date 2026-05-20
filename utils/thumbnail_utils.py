@@ -47,7 +47,6 @@ def generate_thumbnail(filepath, size=config.THUMBNAIL_SIZE):
             return ('image/jpeg', cached_thumb)
     except Exception as e:
         logger.error(f"获取文件状态失败 {filepath}: {e}", exc_info=True)
-        print(f"[ERROR] 获取文件状态失败 {filepath}: {e}", flush=True)
         pass
 
     ext = os.path.splitext(filepath)[1].lower()
@@ -61,7 +60,6 @@ def generate_thumbnail(filepath, size=config.THUMBNAIL_SIZE):
                 return None
         except Exception as e:
             logger.error(f"获取图片大小失败 {filepath}: {e}", exc_info=True)
-            print(f"[ERROR] 获取图片大小失败 {filepath}: {e}", flush=True)
             return None
 
     img = None
@@ -83,14 +81,11 @@ def generate_thumbnail(filepath, size=config.THUMBNAIL_SIZE):
                     img.thumbnail(size, LANCZOS)
                 else:
                     logger.error(f"OpenCV 无法从视频中截取帧: {filepath}")
-                    print(f"[ERROR] OpenCV 无法从视频中截取帧: {filepath}", flush=True)
                 cap.release()
             else:
                 logger.error(f"OpenCV 无法打开视频文件: {filepath}")
-                print(f"[ERROR] OpenCV 无法打开视频文件: {filepath}", flush=True)
         elif is_video and not HAS_CV2:
             logger.error(f"视频缩略图生成失败: OpenCV 未安装, 文件={filepath}")
-            print(f"[ERROR] 视频缩略图生成失败: OpenCV 未安装, 文件={filepath}", flush=True)
 
         if img:
             if img.mode in ('RGBA', 'P'):
@@ -108,13 +103,11 @@ def generate_thumbnail(filepath, size=config.THUMBNAIL_SIZE):
                 cache_manager.set_thumbnail_cache(filepath, stat.st_mtime, stat.st_size, size, thumbnail_data)
             except Exception as e:
                 logger.error(f"缓存缩略图失败 {filepath}: {e}", exc_info=True)
-                print(f"[ERROR] 缓存缩略图失败 {filepath}: {e}", flush=True)
                 pass
 
             return ('image/jpeg', thumbnail_data)
     except Exception as e:
         logger.error(f"生成缩略图失败 {filepath}: {e}", exc_info=True)
-        print(f"[ERROR] 生成缩略图失败 {filepath}: {e}", flush=True)
     return None
 
 def log_thumbnail_backend_status():
@@ -123,6 +116,3 @@ def log_thumbnail_backend_status():
         logger.info('OpenCV 可用，视频缩略图将使用 OpenCV')
     else:
         logger.warning('[ERROR] OpenCV 不可用，视频缩略图功能不可用')
-
-# 初始化时记录状态
-log_thumbnail_backend_status()

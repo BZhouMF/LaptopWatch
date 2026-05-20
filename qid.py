@@ -526,13 +526,11 @@ def api_dirs():
 @qid_app.route('/api/logs/ingest', methods=['POST'])
 def api_logs_ingest():
     """接收 gui.py 推送的日志行"""
+    data = request.get_json() or {}
     # 支持密码直接认证（gui.py 无 session cookie）
     if not session.get('qid_authenticated'):
-        data = request.get_json() or {}
         if data.get('password') != config.DEFAULT_PASSWORD:
             return jsonify({'code': 1, 'msg': '未登录'}), 401
-    else:
-        data = request.get_json() or {}
     line = data.get('line', '')
     if line:
         add_log(line)

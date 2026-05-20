@@ -134,17 +134,18 @@ def _init_state():
 
 
 def _refill_buffer(state):
-    """为 random_walk 模式补充视频缓冲"""
+    """为 random_walk 模式补充视频缓冲（循环实现，避免栈溢出）"""
     tid = state.get('traversal_id')
     if not tid:
         return
-    files, has_more = get_next_media_files(tid, config.PAGE_LOAD)
-    videos = [f for f in files if f.get('is_video')]
-    if not videos and has_more:
-        _refill_buffer(state)
-        return
-    state['buffer'] = videos
-    state['has_more'] = has_more
+    while True:
+        files, has_more = get_next_media_files(tid, config.PAGE_LOAD)
+        videos = [f for f in files if f.get('is_video')]
+        if not videos and has_more:
+            continue
+        state['buffer'] = videos
+        state['has_more'] = has_more
+        break
 
 
 @douyin_bp.route('/init')

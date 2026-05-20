@@ -161,7 +161,6 @@ def init_traversal(root_path, run_mode):
     # 确保是Path对象
     if isinstance(root_path, str):
         root_path = Path(root_path)
-    print(f"[INFO] 初始化遍历: {root_path.name}, 模式={run_mode}", flush=True)
 
     # 清理超过 1 小时未活动的旧遍历
     stale_threshold = time.time() - 3600
@@ -178,7 +177,6 @@ def init_traversal(root_path, run_mode):
 
     if not root_subfolders:
         logger.info("根目录没有子文件夹，直接播放根目录")
-        print(f"[INFO] 根目录没有子文件夹，直接播放根目录", flush=True)
         traversal_id = str(uuid.uuid4())
         with _traversal_lock:
             _traversal_store[traversal_id] = {
@@ -195,7 +193,6 @@ def init_traversal(root_path, run_mode):
     # 有子文件夹，随机选一个根目录子文件夹作为起点
     start_root_idx = random.randint(0, len(root_subfolders) - 1)
     logger.info(f"随机选择第 {start_root_idx} 个根目录子文件夹: {root_subfolders[start_root_idx]['name']}")
-    print(f"[INFO] 随机选择起点根文件夹: {root_subfolders[start_root_idx]['name']}", flush=True)
 
     # 构建初始的文件夹遍历栈，记录同级文件夹信息，用于随机选择起点子文件夹
     start_root_folder = root_subfolders[start_root_idx]['path']
@@ -234,7 +231,6 @@ def init_traversal(root_path, run_mode):
     # 记录最终的起点文件夹
     start_leaf_folder = current_path
     logger.info(f"初始叶子文件夹: {start_leaf_folder}")
-    print(f"[INFO] 初始播放文件夹: {Path(start_leaf_folder).name}", flush=True)
 
     traversal_id = str(uuid.uuid4())
     with _traversal_lock:
@@ -348,87 +344,87 @@ def _format_file_item(f):
 
 
 def get_next_media_files(traversal_id, limit):
-    """获取下一批媒体文件，返回 (files_list, has_more)"""
+    """获取下一批媒体文件，返回 (files_list, has_more)
+    注意: 整个函数在 _traversal_lock 保护下执行，确保线程安全。
+    """
     with _traversal_lock:
         traversal = _traversal_store.get(traversal_id)
 
-    if not traversal:
-        logger.error(f"get_next_media_files: traversal_id 未找到: {traversal_id}")
-        return [], False
+        if not traversal:
+            logger.error(f"get_next_media_files: traversal_id 未找到: {traversal_id}")
+            return [], False
 
-    if traversal.get('finished'):
-        with _traversal_lock:
+        if traversal.get('finished'):
             _traversal_store.pop(traversal_id, None)
-        return [], False
+            return [], False
 
-    result = []
-    traversal['last_activity_time'] = time.time()
+        result = []
+        traversal['last_activity_time'] = time.time()
 
-    current_folder = traversal['current_folder']
-    current_idx = traversal.get('current_file_idx', 0)
+        current_folder = traversal['current_folder']
+        current_idx = traversal.get('current_file_idx', 0)
 
-    # 持续获取文件，直到达到limit或没有更多文件
-    while len(result) < limit:
-        if time.time() - traversal['last_activity_time'] > 20:
-            traversal['finished'] = True
-            break
-
-        current_files = get_files_in_folder(current_folder)
-
-        # 如果当前文件夹还有文件，添加到结果中
-        if current_idx < len(current_files):
-            f = current_files[current_idx]
-            result.append(_format_file_item(f))
-            current_idx += 1
-        else:
-            # 当前文件夹没有更多文件了，需要找到下一个有文件的文件夹
-            next_folder_found = False
-            while not next_folder_found:
-                next_folder, has_more = _get_next_folder(traversal)
-
-                if not has_more or not next_folder:
-                    # 没有更多文件夹了，退出循环
-                    break
-
-                # 检查这个新文件夹是否有文件
-                next_files = get_files_in_folder(next_folder)
-                if len(next_files) > 0:
-                    # 找到了有文件的文件夹
-                    current_folder = next_folder
-                    traversal['current_folder'] = current_folder
-                    current_idx = 0
-                    next_folder_found = True
-                # 如果这个文件夹也没文件，继续循环寻找下一个
-
-            if not next_folder_found:
-                # 没有更多文件夹了，退出主循环
+        # 持续获取文件，直到达到limit或没有更多文件
+        while len(result) < limit:
+            if time.time() - traversal['last_activity_time'] > 20:
+                traversal['finished'] = True
                 break
 
-    traversal['current_file_idx'] = current_idx
+            current_files = get_files_in_folder(current_folder)
 
-    # 检查是否还有更多文件可以获取
-    has_more = False
+            # 如果当前文件夹还有文件，添加到结果中
+            if current_idx < len(current_files):
+                f = current_files[current_idx]
+                result.append(_format_file_item(f))
+                current_idx += 1
+            else:
+                # 当前文件夹没有更多文件了，需要找到下一个有文件的文件夹
+                next_folder_found = False
+                while not next_folder_found:
+                    next_folder, has_more = _get_next_folder(traversal)
 
-    # 检查是否已标记为完成
-    if traversal.get('finished', False):
+                    if not has_more or not next_folder:
+                        # 没有更多文件夹了，退出循环
+                        break
+
+                    # 检查这个新文件夹是否有文件
+                    next_files = get_files_in_folder(next_folder)
+                    if len(next_files) > 0:
+                        # 找到了有文件的文件夹
+                        current_folder = next_folder
+                        traversal['current_folder'] = current_folder
+                        current_idx = 0
+                        next_folder_found = True
+                    # 如果这个文件夹也没文件，继续循环寻找下一个
+
+                if not next_folder_found:
+                    # 没有更多文件夹了，退出主循环
+                    break
+
+        traversal['current_file_idx'] = current_idx
+
+        # 检查是否还有更多文件可以获取
         has_more = False
-        with _traversal_lock:
-            _traversal_store.pop(traversal_id, None)
-    else:
-        # 首先检查当前文件夹是否还有剩余文件
-        current_files = get_files_in_folder(traversal['current_folder'])
-        if current_idx < len(current_files):
-            has_more = True
-        else:
-            # 当前文件夹没有文件了，尝试查找下一个文件夹看看是否有文件
-            # 我们暂时不修改traversal状态
-            folder_stack = traversal.get('folder_stack', [])
-            if folder_stack:
-                # 假设还有更多（除非遍历真的结束了）
-                has_more = True
 
-    logger.info(f"get_next_media_files: 返回 {len(result)} 个文件, has_more={has_more}")
-    return result, has_more
+        # 检查是否已标记为完成
+        if traversal.get('finished', False):
+            has_more = False
+            _traversal_store.pop(traversal_id, None)
+        else:
+            # 首先检查当前文件夹是否还有剩余文件
+            current_files = get_files_in_folder(traversal['current_folder'])
+            if current_idx < len(current_files):
+                has_more = True
+            else:
+                # 当前文件夹没有文件了，尝试查找下一个文件夹看看是否有文件
+                # 我们暂时不修改traversal状态
+                folder_stack = traversal.get('folder_stack', [])
+                if folder_stack:
+                    # 假设还有更多（除非遍历真的结束了）
+                    has_more = True
+
+        logger.info(f"get_next_media_files: 返回 {len(result)} 个文件, has_more={has_more}")
+        return result, has_more
 
 
 # ==================== 顺序遍历（非随机模式） ====================
@@ -476,7 +472,6 @@ def init_sequential_traversal(root_path, run_mode):
     target_ext = config.VIDEO_EXT if run_mode in ('video', 'douyin') else config.IMAGE_EXT
 
     logger.info(f"初始化顺序遍历: root={root_path}, mode={run_mode}")
-    print(f"[INFO] 初始化顺序遍历: {root_path.name}, 模式={run_mode}", flush=True)
 
     # 清理超过 1 小时未活动的旧遍历
     stale_threshold = time.time() - 3600
@@ -524,78 +519,77 @@ def get_next_sequential_files(traversal_id, limit):
     """获取下一批文件（顺序遍历，深度优先）。
     每进入一个文件夹：先逐个深入子文件夹，子文件夹全部走完后消费当前层媒体文件。
     当前层耗尽后弹出栈帧回到父级继续。
+    注意: 整个函数在 _traversal_lock 保护下执行，确保线程安全。
     """
     with _traversal_lock:
         traversal = _traversal_store.get(traversal_id)
-    if not traversal:
-        logger.error(f"get_next_sequential_files: traversal_id 未找到: {traversal_id}")
-        return [], False
+        if not traversal:
+            logger.error(f"get_next_sequential_files: traversal_id 未找到: {traversal_id}")
+            return [], False
 
-    if traversal.get('finished'):
-        with _traversal_lock:
+        if traversal.get('finished'):
             _traversal_store.pop(traversal_id, None)
-        return [], False
+            return [], False
 
-    traversal['last_activity_time'] = time.time()
-    result = []
-    target_ext = config.VIDEO_EXT if traversal.get('run_mode') in ('video', 'douyin') else config.IMAGE_EXT
-    stack = traversal['folder_stack']
+        traversal['last_activity_time'] = time.time()
+        result = []
+        target_ext = config.VIDEO_EXT if traversal.get('run_mode') in ('video', 'douyin') else config.IMAGE_EXT
+        stack = traversal['folder_stack']
 
-    while len(result) < limit:
-        if not stack:
-            traversal['finished'] = True
-            break
+        while len(result) < limit:
+            if not stack:
+                traversal['finished'] = True
+                break
 
-        frame = stack[-1]
+            frame = stack[-1]
 
-        # 阶段1：还有子文件夹未探索 → 进入下一个子文件夹并下钻到叶子
-        if frame['current_subfolder_idx'] < len(frame['subfolders']):
-            next_sub = frame['subfolders'][frame['current_subfolder_idx']]
-            frame['current_subfolder_idx'] += 1
+            # 阶段1：还有子文件夹未探索 → 进入下一个子文件夹并下钻到叶子
+            if frame['current_subfolder_idx'] < len(frame['subfolders']):
+                next_sub = frame['subfolders'][frame['current_subfolder_idx']]
+                frame['current_subfolder_idx'] += 1
 
-            current_path = next_sub['path']
-            while True:
-                subfolders = _get_sorted_subfolders(current_path)
-                media_files = _get_sorted_media_files(current_path, target_ext)
-                new_frame = {
-                    'folder_path': str(current_path),
-                    'subfolders': subfolders,
-                    'current_subfolder_idx': 0,
-                    'media_files': media_files,
-                    'media_file_idx': 0,
-                }
-                stack.append(new_frame)
-                if subfolders:
-                    new_frame['current_subfolder_idx'] = 1
-                    current_path = subfolders[0]['path']
-                else:
-                    break
-            continue
+                current_path = next_sub['path']
+                while True:
+                    subfolders = _get_sorted_subfolders(current_path)
+                    media_files = _get_sorted_media_files(current_path, target_ext)
+                    new_frame = {
+                        'folder_path': str(current_path),
+                        'subfolders': subfolders,
+                        'current_subfolder_idx': 0,
+                        'media_files': media_files,
+                        'media_file_idx': 0,
+                    }
+                    stack.append(new_frame)
+                    if subfolders:
+                        new_frame['current_subfolder_idx'] = 1
+                        current_path = subfolders[0]['path']
+                    else:
+                        break
+                continue
 
-        # 阶段2：没有子文件夹了 → 消费当前层自身的媒体文件
-        frame_media = frame['media_files']
-        idx = frame['media_file_idx']
+            # 阶段2：没有子文件夹了 → 消费当前层自身的媒体文件
+            frame_media = frame['media_files']
+            idx = frame['media_file_idx']
 
-        while idx < len(frame_media) and len(result) < limit:
-            result.append(_format_file_item(frame_media[idx]))
-            idx += 1
+            while idx < len(frame_media) and len(result) < limit:
+                result.append(_format_file_item(frame_media[idx]))
+                idx += 1
 
-        frame['media_file_idx'] = idx
+            frame['media_file_idx'] = idx
 
-        if idx >= len(frame_media):
-            # 当前文件夹耗尽，弹出回到父级
-            stack.pop()
-        else:
-            break
+            if idx >= len(frame_media):
+                # 当前文件夹耗尽，弹出回到父级
+                stack.pop()
+            else:
+                break
 
-    has_more = not traversal.get('finished', False) and len(stack) > 0
+        has_more = not traversal.get('finished', False) and len(stack) > 0
 
-    if traversal.get('finished'):
-        with _traversal_lock:
+        if traversal.get('finished'):
             _traversal_store.pop(traversal_id, None)
 
-    logger.info(f"get_next_sequential_files: 返回 {len(result)} 个文件, has_more={has_more}")
-    return result, has_more
+        logger.info(f"get_next_sequential_files: 返回 {len(result)} 个文件, has_more={has_more}")
+        return result, has_more
 
 
 def _build_video_info(f):

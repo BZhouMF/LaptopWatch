@@ -168,18 +168,21 @@ def force_kill_port(port: int = 5000, log_func: Callable = print):
             time.sleep(0.3)
 
 def find_parent_pid(child_pid: str) -> Optional[str]:
-    """获取父进程PID，仅上一级（使用 PowerShell，兼容 Windows 11）"""
+    """获取父进程PID，仅上一级（使用 wmic，启动约 50ms 而非 PowerShell 的 500ms）"""
     try:
         result = subprocess.run(
-            ['powershell', '-NoProfile', '-Command',
-             f'Get-CimInstance Win32_Process -Filter "ProcessId={child_pid}" | Select-Object -ExpandProperty ParentProcessId'],
+            ['wmic', 'process', 'where', f'ProcessId={child_pid}',
+             'get', 'ParentProcessId', '/value'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=5, text=True,
+            timeout=3, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        pid_str = result.stdout.strip()
-        if pid_str.isdigit() and pid_str != '0':
-            return pid_str
+        for line in result.stdout.split('\n'):
+            line = line.strip()
+            if line.startswith('ParentProcessId='):
+                pid_str = line.split('=', 1)[1].strip()
+                if pid_str.isdigit() and pid_str != '0':
+                    return pid_str
     except Exception:
         pass
     return None

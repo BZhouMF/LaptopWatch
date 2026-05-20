@@ -9,11 +9,20 @@ import zipfile
 import urllib.parse
 from flask import Blueprint, request, jsonify, render_template, send_file, after_this_request
 from config import config
-from utils.logging_utils import log_access, log_exception
+from utils.logging_utils import log_access, log_exception, logger
 from utils.file_utils import safe_send_file, sizeof_fmt
 from blueprints.auth import login_required, require_mode
 
 file_bp = Blueprint('file_api', __name__, url_prefix='/file')
+
+def _resolve_file_path(raw_path):
+    """解析并校验文件路径，返回 (规范路径, None) 或 (None, 错误响应)"""
+    decoded = urllib.parse.unquote(raw_path)
+    real_path = os.path.realpath(decoded)
+    if not os.path.exists(real_path):
+        return None, "文件不存在", 404
+    return real_path, None, None
+
 
 @file_bp.route('/raw/<path:filepath>')
 @login_required
@@ -22,11 +31,10 @@ def serve_raw(filepath):
     """原始文件预览"""
     start_time = time.time()
     try:
-        # 解码URL路径
-        decoded_filepath = urllib.parse.unquote(filepath)
-        abs_path = os.path.abspath(decoded_filepath)
+        abs_path, error, code = _resolve_file_path(filepath)
+        if error:
+            return error, code
 
-        # 记录访问的绝对路径
         log_access(request, 'RAW_PREVIEW_ABS', abs_path, details=f"原始路径: {filepath}")
 
         return safe_send_file(abs_path, as_attachment=False)
@@ -45,11 +53,10 @@ def view_file(filepath):
     """文件下载"""
     start_time = time.time()
     try:
-        # 解码URL路径
-        decoded_filepath = urllib.parse.unquote(filepath)
-        abs_path = os.path.abspath(decoded_filepath)
+        abs_path, error, code = _resolve_file_path(filepath)
+        if error:
+            return error, code
 
-        # 记录下载的绝对路径
         log_access(request, 'DOWNLOAD_ABS', abs_path, details=f"原始路径: {filepath}")
 
         return safe_send_file(abs_path, as_attachment=True)
@@ -68,11 +75,9 @@ def view_text_file(filepath):
     """文本文件查看"""
     start_time = time.time()
     try:
-        # 解码URL路径
-        decoded_filepath = urllib.parse.unquote(filepath)
-        abs_path = os.path.abspath(decoded_filepath)
-        if not os.path.exists(abs_path):
-            return "文件不存在", 404
+        abs_path, error, code = _resolve_file_path(filepath)
+        if error:
+            return error, code
         if os.path.getsize(abs_path) > 1024 * 1024:
             return "文件过大", 400
         encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
@@ -163,11 +168,21 @@ def download_folder():
             try:
                 os.unlink(zip_path)
             except Exception as e:
-                print(f"[DEBUG] 清理临时文件失败 {zip_path}: {e}", flush=True)
-                pass
+                logger.debug(f"清理临时文件失败 {zip_path}: {e}")
             return response
+
         folder_name = os.path.basename(abs_path)
-        return send_file(zip_path, as_attachment=True, download_name=f'{folder_name}.zip', mimetype='application/zip')
+        try:
+            return send_file(zip_path, as_attachment=True,
+                             download_name=f'{folder_name}.zip',
+                             mimetype='application/zip')
+        except Exception:
+            # send_file 失败（如客户端断连），立即清理，防止临时文件残留
+            try:
+                os.unlink(zip_path)
+            except Exception:
+                pass
+            raise
     except Exception as e:
         log_exception(request, 'DOWNLOAD_FOLDER', folder_path, e)
         return "文件夹下载失败", 500
@@ -248,11 +263,19 @@ def download_selected():
             try:
                 os.unlink(zip_path)
             except Exception as e:
-                print(f"[DEBUG] 清理临时文件失败 {zip_path}: {e}", flush=True)
-                pass
+                logger.debug(f"清理临时文件失败 {zip_path}: {e}")
             return response
         folder_name = os.path.basename(base_abs) + '_下载' if base_abs else '下载'
-        return send_file(zip_path, as_attachment=True, download_name=f'{folder_name}.zip', mimetype='application/zip')
+        try:
+            return send_file(zip_path, as_attachment=True,
+                             download_name=f'{folder_name}.zip',
+                             mimetype='application/zip')
+        except Exception:
+            try:
+                os.unlink(zip_path)
+            except Exception:
+                pass
+            raise
     except Exception as e:
         log_exception(request, 'DOWNLOAD_SELECTED', base, e)
         return "批量下载失败", 500

@@ -86,10 +86,8 @@ def safe_send_file(abs_path, as_attachment):
     except PermissionError as e:
         from utils.logging_utils import logger
         logger.error(f"无权访问文件 {abs_path}: {e}", exc_info=True)
-        print(f"[ERROR] 无权访问文件 {abs_path}: {e}", flush=True)
         return "[ERROR] 无权访问此文件", 403
     except Exception as e:
         from utils.logging_utils import logger
         logger.error(f"打开文件出错 {abs_path}: {e}", exc_info=True)
-        print(f"[ERROR] 打开文件出错 {abs_path}: {e}", flush=True)
         return f"[ERROR] 打开文件出错: {str(e)}", 500
