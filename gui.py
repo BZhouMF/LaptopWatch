@@ -977,7 +977,7 @@ class AppLauncher(tk.Tk):
                 if not is_port_running:
                     self._reset_after_stop()
             elif not is_port_running and not is_internal_alive:
-                if self.stop_btn.instate(['normal']):
+                if self.stop_btn.instate(['!disabled']):
                     # 防抖：Flask reloader 重启期间端口会短暂空闲，
                     # 连续 2 次检测都空闲（约 4 秒）才认为真正停止
                     debounce = getattr(self, '_stop_debounce', 0) + 1
