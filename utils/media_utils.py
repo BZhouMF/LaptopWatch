@@ -969,24 +969,30 @@ def get_grid_page_files(folder_path, offset, limit, run_mode):
 def check_browse_would_redirect(folder_path):
     """
     检查浏览该文件夹时是否会重定向到 grid 页面。
-    返回 True 表示 /category/browse/ 会触发重定向（叶子或兜底），
+    返回 True 表示 /category/browse/ 会触发重定向（叶子或单分类兜底），
     用于 grid 页面判断返回按钮是否会导致循环。
+
+    直接使用 get_category_children_info 的结果来判断，与 category_browse
+    的实际跳转逻辑保持一致，避免因空子文件夹导致误判。
     """
     if isinstance(folder_path, str):
         folder_path = Path(folder_path)
 
-    # 检查是否有子文件夹
-    try:
-        has_subfolders = any(e.is_dir() for e in os.scandir(str(folder_path)))
-    except Exception:
-        return True  # 无法访问，保守处理
-
-    if not has_subfolders:
-        return True  # 叶子文件夹 → redirect to grid
-
-    # 有子文件夹 → 检查是否满足兜底条件
     info = get_category_children_info(
         str(folder_path), config.RUN_MODE,
         random_mode=config.RANDOM_MODE
     )
-    return info.get('single_leaf_override', False) and info['total_categories'] == 1
+
+    # 叶子节点（无子文件夹）→ grid
+    if info['is_leaf']:
+        return True
+
+    # 所有子文件夹均为空 → 同叶子处理，重定向到 grid
+    if info['total_categories'] == 0:
+        return True
+
+    # 仅有一个带文件的分类且无根文件 → 兜底重定向到 grid
+    if info.get('single_leaf_override') and info['total_categories'] == 1:
+        return True
+
+    return False
