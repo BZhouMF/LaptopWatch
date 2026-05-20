@@ -85,6 +85,13 @@ def inject_routes():
     return {'ROUTES': FRONTEND_ROUTES, 'config': config}
 
 
+@app.template_filter('path_quote')
+def path_quote_filter(path):
+    """URL 编码路径中除斜杠以外的特殊字符"""
+    from urllib.parse import quote
+    return quote(path, safe='/')
+
+
 # 记录视频缩略图后端状态
 log_thumbnail_backend_status()
 
