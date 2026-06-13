@@ -39,11 +39,11 @@ def _db_load_more(offset, limit, is_random):
         table = _media_table(config.RUN_MODE)
 
         if is_random:
-            rows = get_random_media(conn, table, limit)
+            rows = get_random_media(conn, table, limit, media_dir=config.MEDIA_DIR)
             total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             has_more = len(rows) == limit
         else:
-            rows, total = get_media_page_all(conn, table, limit, offset)
+            rows, total = get_media_page_all(conn, table, limit, offset, media_dir=config.MEDIA_DIR)
             has_more = (offset + len(rows)) < total
 
         conn.close()

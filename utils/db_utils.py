@@ -223,24 +223,33 @@ def get_media_page(conn, table, parent_id, limit, offset):
     )
 
 
-def get_media_page_all(conn, table, limit, offset):
+def get_media_page_all(conn, table, limit, offset, media_dir=None):
     """从整个媒体表分页取数据（按 path 排序实现文件夹分组）
 
+    可传入 media_dir 路径前缀过滤，避免返回 MEDIA_DIR 外的残留数据。
     返回 (rows, total_count)
     rows 为 list[dict] — id/parent_id/name/path/modify_time
     """
+    where_clause = "n.type=2"
+    params = []
+    if media_dir:
+        media_prefix = os.path.abspath(str(media_dir)) + os.sep
+        where_clause += " AND m.path LIKE ?"
+        params.append(media_prefix + '%')
+
     total = conn.execute(
-        f"SELECT COUNT(*) FROM {table} m JOIN nodes n ON n.path = m.path WHERE n.type=2"
+        f"SELECT COUNT(*) FROM {table} m JOIN nodes n ON n.path = m.path WHERE {where_clause}",
+        params,
     ).fetchone()[0]
 
     rows = conn.execute(
         f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
             FROM {table} m
             JOIN nodes n ON n.path = m.path
-            WHERE n.type=2
+            WHERE {where_clause}
             ORDER BY m.path ASC
             LIMIT ? OFFSET ?""",
-        (limit, offset),
+        params + [limit, offset],
     ).fetchall()
 
     return (
@@ -255,29 +264,37 @@ def get_media_page_all(conn, table, limit, offset):
     )
 
 
-def get_random_media(conn, table, limit, exclude_paths=None):
+def get_random_media(conn, table, limit, exclude_paths=None, media_dir=None):
     """从媒体表随机取 N 条真实文件（不含目录），可排除指定路径
 
+    可传入 media_dir 路径前缀过滤，避免返回 MEDIA_DIR 外的残留数据。
     返回 list[dict] — id/parent_id/name/path/modify_time
     """
+    where_clause = "n.type=2"
+    params = []
+    if media_dir:
+        media_prefix = os.path.abspath(str(media_dir)) + os.sep
+        where_clause += " AND m.path LIKE ?"
+        params.append(media_prefix + '%')
+
     if exclude_paths:
         placeholders = ','.join('?' for _ in exclude_paths)
         rows = conn.execute(
             f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
                 FROM {table} m
                 JOIN nodes n ON n.path = m.path
-                WHERE n.type=2 AND m.path NOT IN ({placeholders})
+                WHERE {where_clause} AND m.path NOT IN ({placeholders})
                 ORDER BY RANDOM() LIMIT ?""",
-            (*exclude_paths, limit),
+            params + exclude_paths + [limit],
         ).fetchall()
     else:
         rows = conn.execute(
             f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
                 FROM {table} m
                 JOIN nodes n ON n.path = m.path
-                WHERE n.type=2
+                WHERE {where_clause}
                 ORDER BY RANDOM() LIMIT ?""",
-            (limit,),
+            params + [limit],
         ).fetchall()
 
     return [

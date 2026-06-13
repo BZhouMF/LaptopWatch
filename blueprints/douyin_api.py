@@ -54,7 +54,7 @@ def _pick_random_video(exclude_paths):
         if config.MEDIA_DIR:
             sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE, recursive=True)
 
-        rows = get_random_media(conn, 'videos', 1, exclude_paths=exclude_paths)
+        rows = get_random_media(conn, 'videos', 1, exclude_paths=exclude_paths, media_dir=config.MEDIA_DIR)
         conn.close()
         return rows[0] if rows else None
     except Exception as e:

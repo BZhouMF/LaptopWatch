@@ -62,10 +62,10 @@ def index():
 
                     table = 'videos' if config.RUN_MODE in ('video', 'douyin') else 'images'
                     if config.RANDOM_MODE:
-                        rows = get_random_media(conn, table, config.PAGE_FIRST)
+                        rows = get_random_media(conn, table, config.PAGE_FIRST, media_dir=config.MEDIA_DIR)
                         has_more = len(rows) == config.PAGE_FIRST
                     else:
-                        rows, total = get_media_page_all(conn, table, config.PAGE_FIRST, 0)
+                        rows, total = get_media_page_all(conn, table, config.PAGE_FIRST, 0, media_dir=config.MEDIA_DIR)
                         has_more = len(rows) < total
 
                     media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
