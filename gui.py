@@ -401,16 +401,6 @@ class AppLauncher(tk.Tk):
             command=self._on_category_browse_check_toggle)
         self.category_browse_check.pack(side='left')
 
-        # 数据库目录快捷入口
-        db_sep = tk.Frame(self.media_inner, bg=self.border_color, height=1)
-        db_sep.pack(fill='x', pady=(8, 8))
-        db_row = tk.Frame(self.media_inner, bg=self.card_bg)
-        db_row.pack(fill='x')
-        self.db_open_btn = ttk.Button(
-            db_row, text='打开数据库目录', style='Secondary.TButton',
-            command=self._open_db_dir, width=14)
-        self.db_open_btn.pack(side='left')
-
         # ---- 卡片3：服务控制（右）----
         svc_card = ttk.LabelFrame(console_content, text='服务控制',
                                    style='Card.TLabelframe')
@@ -586,12 +576,6 @@ class AppLauncher(tk.Tk):
         """目录浏览模式与随机位置不互斥，无需额外逻辑"""
         pass
 
-    def _open_db_dir(self):
-        """打开数据库目录"""
-        db_dir = Path(config.DB_PATH).parent if config.DB_PATH else Path('db_path')
-        db_dir.mkdir(exist_ok=True)
-        os.startfile(str(db_dir))
-
     def _disable_config_controls(self):
         """启动服务后禁用所有配置控件"""
         for btn in self._mode_buttons.values():
@@ -603,13 +587,11 @@ class AppLauncher(tk.Tk):
         self.random_check.config(state='disabled')
         self.douyin_random_media_check.config(state='disabled')
         self.category_browse_check.config(state='disabled')
-        self.db_open_btn.config(state='disabled')
 
     def _enable_config_controls(self):
         """停止服务后启用所有配置控件"""
         for btn in self._mode_buttons.values():
             btn.config(state='normal')
-        self.db_open_btn.config(state='normal')
         self._on_mode_change()
 
     def _on_mode_change(self):
