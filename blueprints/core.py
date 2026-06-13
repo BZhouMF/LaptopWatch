@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from flask import Blueprint, render_template, session, request
 from config import config
+from utils.file_utils import get_drives
 from utils.logging_utils import log_access, log_exception, logger
 from utils.media_utils import (
     get_category_children_info,
@@ -93,7 +94,6 @@ def index():
                                    total_pages=1,
                                    current_page=1,
                                    has_more=has_more,
-                                   is_traversal=True,
                                    config=config)
     except Exception as e:
         import traceback

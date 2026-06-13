@@ -230,13 +230,15 @@ def get_media_page_all(conn, table, limit, offset):
     rows 为 list[dict] — id/parent_id/name/path/modify_time
     """
     total = conn.execute(
-        f"SELECT COUNT(*) FROM {table}"
+        f"SELECT COUNT(*) FROM {table} m JOIN nodes n ON n.path = m.path WHERE n.type=2"
     ).fetchone()[0]
 
     rows = conn.execute(
-        f"""SELECT id, parent_id, name, path, modify_time
-            FROM {table}
-            ORDER BY path ASC
+        f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
+            FROM {table} m
+            JOIN nodes n ON n.path = m.path
+            WHERE n.type=2
+            ORDER BY m.path ASC
             LIMIT ? OFFSET ?""",
         (limit, offset),
     ).fetchall()
@@ -254,23 +256,26 @@ def get_media_page_all(conn, table, limit, offset):
 
 
 def get_random_media(conn, table, limit, exclude_paths=None):
-    """从媒体表随机取 N 条，可排除指定路径
+    """从媒体表随机取 N 条真实文件（不含目录），可排除指定路径
 
     返回 list[dict] — id/parent_id/name/path/modify_time
     """
     if exclude_paths:
         placeholders = ','.join('?' for _ in exclude_paths)
         rows = conn.execute(
-            f"""SELECT id, parent_id, name, path, modify_time
-                FROM {table}
-                WHERE path NOT IN ({placeholders})
+            f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
+                FROM {table} m
+                JOIN nodes n ON n.path = m.path
+                WHERE n.type=2 AND m.path NOT IN ({placeholders})
                 ORDER BY RANDOM() LIMIT ?""",
             (*exclude_paths, limit),
         ).fetchall()
     else:
         rows = conn.execute(
-            f"""SELECT id, parent_id, name, path, modify_time
-                FROM {table}
+            f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
+                FROM {table} m
+                JOIN nodes n ON n.path = m.path
+                WHERE n.type=2
                 ORDER BY RANDOM() LIMIT ?""",
             (limit,),
         ).fetchall()

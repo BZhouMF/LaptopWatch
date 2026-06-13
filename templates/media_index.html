@@ -134,7 +134,7 @@
             totalPages: {{ total_pages }},
             currentPage: {{ current_page }},
             isRandom: {{ config.RANDOM_MODE|tojson|safe }},
-            isTraversal: {{ is_traversal|tojson|safe }}
+            isTraversal: {{ config.RANDOM_MODE|tojson|safe }}
         };
         var MEDIA_PAGE_CACHE = {};
         MEDIA_PAGE_CACHE[1] = {

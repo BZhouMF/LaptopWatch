@@ -73,6 +73,28 @@ def _seed(conn):
         "VALUES (2, 1, 'vid2.mp4', '/root/vid2.mp4', 200)"
     )
 
+    # nodes 记录对应的媒体文件（供 JOIN 过滤 type=2，parent_id=0 避免干扰 get_children）
+    conn.execute(
+        "INSERT INTO nodes (id, parent_id, name, type, path, size, extension, create_time, modify_time, is_hidden) "
+        "VALUES (30, 0, 'img1.jpg', 2, '/root/img1.jpg', 0, '.jpg', 100, 100, 0)"
+    )
+    conn.execute(
+        "INSERT INTO nodes (id, parent_id, name, type, path, size, extension, create_time, modify_time, is_hidden) "
+        "VALUES (31, 0, 'img2.jpg', 2, '/root/img2.jpg', 0, '.jpg', 100, 200, 0)"
+    )
+    conn.execute(
+        "INSERT INTO nodes (id, parent_id, name, type, path, size, extension, create_time, modify_time, is_hidden) "
+        "VALUES (32, 0, 'sub_img.jpg', 2, '/root/a_folder/sub_img.jpg', 0, '.jpg', 100, 300, 0)"
+    )
+    conn.execute(
+        "INSERT INTO nodes (id, parent_id, name, type, path, size, extension, create_time, modify_time, is_hidden) "
+        "VALUES (33, 0, 'vid1.mp4', 2, '/root/vid1.mp4', 0, '.mp4', 100, 100, 0)"
+    )
+    conn.execute(
+        "INSERT INTO nodes (id, parent_id, name, type, path, size, extension, create_time, modify_time, is_hidden) "
+        "VALUES (34, 0, 'vid2.mp4', 2, '/root/vid2.mp4', 0, '.mp4', 100, 200, 0)"
+    )
+
     conn.commit()
 
 
