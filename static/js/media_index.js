@@ -98,7 +98,7 @@ function showLoadingPlaceholders() {
 function loadPage(page) {
     if (isTraversalMode && pageCache[page]) {
         var cached = pageCache[page];
-        renderPage(cached.data, page, cached.hasMore);
+        renderPage(cached.data, page, cached.hasMore, cached.total, cached.nextOffset);
         return;
     }
 
@@ -143,10 +143,12 @@ function loadPage(page) {
                 if (isTraversalMode) {
                     pageCache[page] = {
                         data: data.data,
-                        hasMore: data.has_more
+                        hasMore: data.has_more,
+                        total: data.total,
+                        nextOffset: newOffset + data.data.length
                     };
                 }
-                renderPage(data.data, page, data.has_more, newOffset);
+                renderPage(data.data, page, data.has_more, data.total, newOffset);
             } else {
                 var grid = document.getElementById('mediaGrid');
                 grid.innerHTML = '<div class="error-message" style="grid-column: 1 / -1; text-align: center; padding: 40px; color: #ff6b6b;">加载失败: ' + data.msg + '</div>';
@@ -170,7 +172,7 @@ function loadPage(page) {
         });
 }
 
-function renderPage(items, page, more, newOffset) {
+function renderPage(items, page, more, total, newOffset) {
     var grid = document.getElementById('mediaGrid');
     grid.innerHTML = '';
 
@@ -191,7 +193,9 @@ function renderPage(items, page, more, newOffset) {
     currentPage = page;
     hasMore = more;
 
-    if (isTraversalMode && hasMore && currentPage >= totalPages) {
+    if (typeof total === 'number' && total > 0) {
+        totalPages = Math.max(1, Math.ceil(total / pageLoad));
+    } else if (isTraversalMode && hasMore && currentPage >= totalPages) {
         totalPages = currentPage + 1;
     }
 

@@ -47,14 +47,16 @@ def _pick_random_video(exclude_paths):
         if not db_path:
             return None
 
-        from utils.db_utils import get_db, ensure_tables, sync_folder, get_random_media
+        from utils.db_utils import get_db, ensure_tables, sync_folder, \
+            get_random_media, drive_prefix
 
         conn = get_db(db_path)
-        ensure_tables(conn)
+        prefix = drive_prefix(str(config.MEDIA_DIR))
+        ensure_tables(conn, prefix=prefix)
         if config.MEDIA_DIR:
-            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE, recursive=True)
+            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
 
-        rows = get_random_media(conn, 'videos', 1, exclude_paths=exclude_paths, media_dir=config.MEDIA_DIR)
+        rows = get_random_media(conn, f'{prefix}_v', 1, exclude_paths=exclude_paths, media_dir=config.MEDIA_DIR)
         conn.close()
         return rows[0] if rows else None
     except Exception as e:

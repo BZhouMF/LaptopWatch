@@ -7,6 +7,23 @@ from io import BytesIO
 from config import config
 
 
+def drive_prefix(path):
+    """从路径提取盘符前缀，'D:/xxx' → 'd'"""
+    drive_letter, _ = os.path.splitdrive(os.path.abspath(str(path)))
+    return drive_letter[0].lower() if drive_letter else 'x'
+
+
+def disk_table_names(path):
+    """返回 (file_table, video_table, image_table) 三元组"""
+    p = drive_prefix(path)
+    return f'{p}_file', f'{p}_v', f'{p}_p'
+
+
+def _file_table_from_media_table(media_table):
+    """'d_v' → 'd_file'，从媒体表名反推文件表名"""
+    return media_table.rsplit('_', 1)[0] + '_file'
+
+
 def get_db(db_path):
     """创建数据库连接，启用 WAL 模式"""
     conn = sqlite3.connect(db_path)
@@ -15,10 +32,13 @@ def get_db(db_path):
     return conn
 
 
-def ensure_tables(conn):
-    """创建 nodes/images/videos 三张表（幂等）"""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS nodes (
+def _create_tables_for_prefix(conn, prefix):
+    """为指定盘符创建三张表（幂等）"""
+    file_table = f'{prefix}_file'
+    video_table = f'{prefix}_v'
+    image_table = f'{prefix}_p'
+    conn.executescript(f"""
+        CREATE TABLE IF NOT EXISTS {file_table} (
             id          INTEGER PRIMARY KEY,
             parent_id   INTEGER NOT NULL DEFAULT 0,
             name        TEXT NOT NULL,
@@ -31,7 +51,7 @@ def ensure_tables(conn):
             is_hidden   INTEGER NOT NULL DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS images (
+        CREATE TABLE IF NOT EXISTS {image_table} (
             id          INTEGER PRIMARY KEY,
             parent_id   INTEGER NOT NULL DEFAULT 0,
             name        TEXT NOT NULL,
@@ -40,7 +60,7 @@ def ensure_tables(conn):
             cover       BLOB DEFAULT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS videos (
+        CREATE TABLE IF NOT EXISTS {video_table} (
             id          INTEGER PRIMARY KEY,
             parent_id   INTEGER NOT NULL DEFAULT 0,
             name        TEXT NOT NULL,
@@ -49,6 +69,24 @@ def ensure_tables(conn):
             cover       BLOB DEFAULT NULL
         );
     """)
+    conn.commit()
+
+
+def ensure_tables(conn, prefix=None):
+    """创建 per-disk 表（幂等）
+
+    传 prefix 时创建对应盘的三张表；
+    不传时扫描现有 _file 表，补齐对应盘的完整三件套。
+    """
+    if prefix:
+        _create_tables_for_prefix(conn, prefix)
+    else:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_file' ESCAPE '\\'"
+        )
+        existing_prefixes = {row[0][:-5] for row in cursor.fetchall()}
+        for p in existing_prefixes:
+            _create_tables_for_prefix(conn, p)
     conn.commit()
 
 
@@ -63,32 +101,27 @@ def _get_hidden_flag(entry_name, stat_info):
     return 1 if (st_file_attributes & 2) else 0
 
 
-def _ensure_node(conn, folder_path):
-    """确保文件夹路径在 nodes 中存在，返回其 id（不递归创建祖先）"""
+def _ensure_node(conn, file_table, folder_path):
+    """确保文件夹路径在 file_table 中存在，返回其 id；父节点不存在时递归创建祖先链"""
     folder_path = os.path.abspath(folder_path)
 
     cursor = conn.execute(
-        "SELECT id FROM nodes WHERE path=? AND type=1", (folder_path,)
+        f"SELECT id FROM {file_table} WHERE path=? AND type=1", (folder_path,)
     )
     row = cursor.fetchone()
     if row:
         return row[0]
 
-    # 查找已在 DB 中的父节点（不会自动创建）
+    # 递归确保父节点存在（根路径如 C:\ 的 dirname 是自身，会终止递归）
     parent_path = os.path.dirname(folder_path)
     parent_id = 0
     if parent_path and parent_path != folder_path:
-        cursor = conn.execute(
-            "SELECT id FROM nodes WHERE path=? AND type=1", (parent_path,)
-        )
-        parent_row = cursor.fetchone()
-        if parent_row:
-            parent_id = parent_row[0]
+        parent_id = _ensure_node(conn, file_table, parent_path)
 
     name = os.path.basename(folder_path) or folder_path
     try:
         st = os.stat(folder_path)
-        create_time = st.st_ctime
+        create_time = getattr(st, 'st_birthtime', st.st_ctime)
         modify_time = st.st_mtime
         is_hidden = _get_hidden_flag(name, st)
     except OSError:
@@ -96,24 +129,25 @@ def _ensure_node(conn, folder_path):
         is_hidden = 0
 
     cursor = conn.execute(
-        """INSERT INTO nodes (parent_id, name, type, path, size, extension,
-                              create_time, modify_time, is_hidden)
+        f"""INSERT INTO {file_table} (parent_id, name, type, path, size, extension,
+                                       create_time, modify_time, is_hidden)
            VALUES (?, ?, 1, ?, 0, NULL, ?, ?, ?)""",
         (parent_id, name, folder_path, create_time, modify_time, is_hidden),
     )
     return cursor.lastrowid
 
 
-def _upsert_media_record(conn, run_mode, parent_id, entry, modify_time, entry_type, is_dir):
-    """按 run_mode 同步一条记录到 images/videos 表，保留已有 cover"""
+def _upsert_media_record(conn, run_mode, parent_id, entry, modify_time, entry_type, is_dir,
+                         video_table='videos', image_table='images'):
+    """按 run_mode 同步一条记录到 per-disk 视频/图片表，保留已有 cover"""
     if run_mode == 'normal':
         return
 
     if run_mode in ('video', 'douyin'):
-        table = 'videos'
+        table = video_table
         valid_ext = config.VIDEO_EXT
     elif run_mode == 'image':
-        table = 'images'
+        table = image_table
         valid_ext = config.IMAGE_EXT
     else:
         return
@@ -140,22 +174,28 @@ def _upsert_media_record(conn, run_mode, parent_id, entry, modify_time, entry_ty
         )
 
 
-def _delete_cascade(conn, node_id):
-    """递归删除节点及其所有子节点（nodes + images/videos）"""
-    cursor = conn.execute("SELECT id, path FROM nodes WHERE parent_id=?", (node_id,))
+def _delete_cascade(conn, file_table, node_id):
+    """递归删除节点及其所有子节点（file/video/image 表）
+    file_table 如 'd_file'，从中反推 'd_v' 和 'd_p'
+    """
+    prefix = file_table[:-5]  # 去掉 '_file' 后缀
+    image_table = f'{prefix}_p'
+    video_table = f'{prefix}_v'
+
+    cursor = conn.execute(f"SELECT id, path FROM {file_table} WHERE parent_id=?", (node_id,))
     children = cursor.fetchall()
 
     for child_id, child_path in children:
-        _delete_cascade(conn, child_id)
+        _delete_cascade(conn, file_table, child_id)
 
-    cursor = conn.execute("SELECT path FROM nodes WHERE id=?", (node_id,))
+    cursor = conn.execute(f"SELECT path FROM {file_table} WHERE id=?", (node_id,))
     row = cursor.fetchone()
     if row:
         node_path = row[0]
-        conn.execute("DELETE FROM images WHERE path=?", (node_path,))
-        conn.execute("DELETE FROM videos WHERE path=?", (node_path,))
+        conn.execute(f"DELETE FROM {image_table} WHERE path=?", (node_path,))
+        conn.execute(f"DELETE FROM {video_table} WHERE path=?", (node_path,))
 
-    conn.execute("DELETE FROM nodes WHERE id=?", (node_id,))
+    conn.execute(f"DELETE FROM {file_table} WHERE id=?", (node_id,))
 
 
 # ── 公开 API ──────────────────────────────────────────────
@@ -163,9 +203,10 @@ def _delete_cascade(conn, node_id):
 # ── 查询接口 ──────────────────────────────────────────────
 
 
-def get_children(conn, parent_id, sort_type='name', sort_order='asc'):
+def get_children(conn, file_table, parent_id, sort_type='name', sort_order='asc'):
     """返回某文件夹下所有子项，文件夹在前、文件在后
 
+    file_table: per-disk 文件表名，如 'd_file'
     sort_type: 'name' | 'time'
     sort_order: 'asc' | 'desc'
     返回 list[dict] — id/parent_id/name/type/path/size/extension/modify_time/is_hidden
@@ -176,7 +217,7 @@ def get_children(conn, parent_id, sort_type='name', sort_order='asc'):
     rows = conn.execute(
         f"""SELECT id, parent_id, name, type, path, size, extension,
                    modify_time, is_hidden
-            FROM nodes
+            FROM {file_table}
             WHERE parent_id=?
             ORDER BY type ASC, {order_col} {order_dir}""",
         (parent_id,),
@@ -227,9 +268,11 @@ def get_media_page_all(conn, table, limit, offset, media_dir=None):
     """从整个媒体表分页取数据（按 path 排序实现文件夹分组）
 
     可传入 media_dir 路径前缀过滤，避免返回 MEDIA_DIR 外的残留数据。
+    table 为 per-disk 媒体表名，如 'd_v' 或 'd_p'。
     返回 (rows, total_count)
     rows 为 list[dict] — id/parent_id/name/path/modify_time
     """
+    file_table = _file_table_from_media_table(table)
     where_clause = "n.type=2"
     params = []
     if media_dir:
@@ -238,14 +281,14 @@ def get_media_page_all(conn, table, limit, offset, media_dir=None):
         params.append(media_prefix + '%')
 
     total = conn.execute(
-        f"SELECT COUNT(*) FROM {table} m JOIN nodes n ON n.path = m.path WHERE {where_clause}",
+        f"SELECT COUNT(*) FROM {table} m JOIN {file_table} n ON n.path = m.path WHERE {where_clause}",
         params,
     ).fetchone()[0]
 
     rows = conn.execute(
         f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
             FROM {table} m
-            JOIN nodes n ON n.path = m.path
+            JOIN {file_table} n ON n.path = m.path
             WHERE {where_clause}
             ORDER BY m.path ASC
             LIMIT ? OFFSET ?""",
@@ -267,9 +310,11 @@ def get_media_page_all(conn, table, limit, offset, media_dir=None):
 def get_random_media(conn, table, limit, exclude_paths=None, media_dir=None):
     """从媒体表随机取 N 条真实文件（不含目录），可排除指定路径
 
+    table 为 per-disk 媒体表名，如 'd_v' 或 'd_p'。
     可传入 media_dir 路径前缀过滤，避免返回 MEDIA_DIR 外的残留数据。
     返回 list[dict] — id/parent_id/name/path/modify_time
     """
+    file_table = _file_table_from_media_table(table)
     where_clause = "n.type=2"
     params = []
     if media_dir:
@@ -282,7 +327,7 @@ def get_random_media(conn, table, limit, exclude_paths=None, media_dir=None):
         rows = conn.execute(
             f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
                 FROM {table} m
-                JOIN nodes n ON n.path = m.path
+                JOIN {file_table} n ON n.path = m.path
                 WHERE {where_clause} AND m.path NOT IN ({placeholders})
                 ORDER BY RANDOM() LIMIT ?""",
             params + exclude_paths + [limit],
@@ -291,7 +336,7 @@ def get_random_media(conn, table, limit, exclude_paths=None, media_dir=None):
         rows = conn.execute(
             f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
                 FROM {table} m
-                JOIN nodes n ON n.path = m.path
+                JOIN {file_table} n ON n.path = m.path
                 WHERE {where_clause}
                 ORDER BY RANDOM() LIMIT ?""",
             params + [limit],
@@ -306,16 +351,17 @@ def get_random_media(conn, table, limit, exclude_paths=None, media_dir=None):
     ]
 
 
-def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
+def get_subfolder_nodes(conn, file_table, parent_id, sort_type='name', sort_order='asc'):
     """获取某个节点的直接子文件夹列表
 
+    file_table: per-disk 文件表名，如 'd_file'
     返回 list[dict] — id/name/path
     """
     order_col = 'modify_time' if sort_type == 'time' else 'name'
     order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
     rows = conn.execute(
         f"""SELECT id, name, path
-            FROM nodes
+            FROM {file_table}
             WHERE parent_id=? AND type=1
             ORDER BY {order_col} {order_dir}""",
         (parent_id,),
@@ -323,10 +369,10 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
     return [{'id': r[0], 'name': r[1], 'path': r[2]} for r in rows]
 
 
-def get_node_by_path(conn, path):
-    """根据路径查找 nodes 表中的节点，返回 dict 或 None"""
+def get_node_by_path(conn, file_table, path):
+    """根据路径查找 file_table 中的节点，返回 dict 或 None"""
     cursor = conn.execute(
-        "SELECT id, parent_id, name, type, path FROM nodes WHERE path=?", (path,)
+        f"SELECT id, parent_id, name, type, path FROM {file_table} WHERE path=?", (path,)
     )
     row = cursor.fetchone()
     if row:
@@ -339,30 +385,32 @@ def get_media_in_folder(conn, table, folder_path, limit, offset,
                         sort_type='name', sort_order='asc'):
     """获取文件夹（递归含子文件夹）中的媒体文件，分页
 
-    通过 path 前缀匹配 + nodes 关联实现递归查询，只返回文件（type=2）。
+    table 为 per-disk 媒体表名，如 'd_v' 或 'd_p'。
+    通过 path 前缀匹配 + file_table 关联实现递归查询，只返回文件（type=2）。
     返回 (rows, total_count)
     rows 为 list[dict] — id/parent_id/name/path/modify_time
     """
+    file_table = _file_table_from_media_table(table)
     norm_path = os.path.normpath(folder_path)
-    prefix = norm_path + os.sep
+    prefix_where = norm_path + os.sep
     order_col = 'modify_time' if sort_type == 'time' else 'name'
     order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
 
     total = conn.execute(
         f"""SELECT COUNT(*) FROM {table} m
-            JOIN nodes n ON n.path = m.path
+            JOIN {file_table} n ON n.path = m.path
             WHERE m.path LIKE ? AND n.type=2""",
-        (prefix + '%',)
+        (prefix_where + '%',)
     ).fetchone()[0]
 
     rows = conn.execute(
         f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
             FROM {table} m
-            JOIN nodes n ON n.path = m.path
+            JOIN {file_table} n ON n.path = m.path
             WHERE m.path LIKE ? AND n.type=2
             ORDER BY {order_col} {order_dir}
             LIMIT ? OFFSET ?""",
-        (prefix + '%', limit, offset),
+        (prefix_where + '%', limit, offset),
     ).fetchall()
 
     return (
@@ -378,16 +426,20 @@ def get_media_in_folder(conn, table, folder_path, limit, offset,
 
 
 def get_random_media_in_folder(conn, table, folder_path, limit):
-    """从文件夹（递归含子文件夹）中随机取媒体文件（仅文件）"""
+    """从文件夹（递归含子文件夹）中随机取媒体文件（仅文件）
+
+    table 为 per-disk 媒体表名，如 'd_v' 或 'd_p'。
+    """
+    file_table = _file_table_from_media_table(table)
     norm_path = os.path.normpath(folder_path)
-    prefix = norm_path + os.sep
+    prefix_where = norm_path + os.sep
     rows = conn.execute(
         f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
             FROM {table} m
-            JOIN nodes n ON n.path = m.path
+            JOIN {file_table} n ON n.path = m.path
             WHERE m.path LIKE ? AND n.type=2
             ORDER BY RANDOM() LIMIT ?""",
-        (prefix + '%', limit),
+        (prefix_where + '%', limit),
     ).fetchall()
     return [
         {
@@ -504,17 +556,19 @@ def sync_folder(conn, folder_path, run_mode='normal', recursive=False, _depth=0)
     """增量同步单个文件夹（仅 scandir 1 层），可选递归同步子文件夹
 
     当 recursive=True 时递归同步所有后代子文件夹，_depth 用于限制递归深度。
+    自动根据 folder_path 的盘符选用 per-disk 表。
     """
     if _depth > 50:
         return
     folder_path = os.path.abspath(folder_path)
-    folder_id = _ensure_node(conn, folder_path)
+    file_table, video_table, image_table = disk_table_names(folder_path)
+    folder_id = _ensure_node(conn, file_table, folder_path)
 
     # 收集 DB 现有子项 {path: {col: value}}
     db_children = {}
     cursor = conn.execute(
-        """SELECT id, name, path, modify_time, type, extension, size, is_hidden
-           FROM nodes WHERE parent_id=?""",
+        f"""SELECT id, name, path, modify_time, type, extension, size, is_hidden
+           FROM {file_table} WHERE parent_id=?""",
         (folder_id,),
     )
     for row in cursor.fetchall():
@@ -562,44 +616,48 @@ def sync_folder(conn, folder_path, run_mode='normal', recursive=False, _depth=0)
             )
             if needs_update:
                 conn.execute(
-                    """UPDATE nodes SET size=?, extension=?, modify_time=?,
+                    f"""UPDATE {file_table} SET size=?, extension=?, modify_time=?,
                        type=?, is_hidden=? WHERE id=?""",
                     (fs_size, fs_ext, fs_mtime, fs_type, fs_hidden, db_row['id']),
                 )
-                _upsert_media_record(conn, run_mode, folder_id, entry, fs_mtime, fs_type, is_dir)
+                for media_mode in ('video', 'image'):
+                    _upsert_media_record(conn, media_mode, folder_id, entry, fs_mtime, fs_type, is_dir,
+                                         video_table=video_table, image_table=image_table)
         else:
             # 检查 path 是否因之前的独立同步已存在于 DB
             cursor = conn.execute(
-                "SELECT id FROM nodes WHERE path=?", (entry_path,)
+                f"SELECT id FROM {file_table} WHERE path=?", (entry_path,)
             )
             existing = cursor.fetchone()
             if existing:
                 conn.execute(
-                    """UPDATE nodes SET parent_id=?, name=?, type=?, size=?,
+                    f"""UPDATE {file_table} SET parent_id=?, name=?, type=?, size=?,
                        extension=?, modify_time=?, is_hidden=? WHERE id=?""",
                     (folder_id, entry.name, fs_type, fs_size, fs_ext,
                      fs_mtime, fs_hidden, existing[0]),
                 )
             else:
                 conn.execute(
-                    """INSERT INTO nodes (parent_id, name, type, path, size, extension,
-                                          create_time, modify_time, is_hidden)
+                    f"""INSERT INTO {file_table} (parent_id, name, type, path, size, extension,
+                                                   create_time, modify_time, is_hidden)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (folder_id, entry.name, fs_type, entry_path, fs_size, fs_ext,
                      fs_ctime, fs_mtime, fs_hidden),
                 )
-            _upsert_media_record(conn, run_mode, folder_id, entry, fs_mtime, fs_type, is_dir)
+            for media_mode in ('video', 'image'):
+                _upsert_media_record(conn, media_mode, folder_id, entry, fs_mtime, fs_type, is_dir,
+                                     video_table=video_table, image_table=image_table)
 
     # 删除文件系统中已不存在的条目
     for path, db_row in db_children.items():
-        _delete_cascade(conn, db_row['id'])
+        _delete_cascade(conn, file_table, db_row['id'])
 
     conn.commit()
 
     # 递归同步子文件夹
     if recursive:
         cursor = conn.execute(
-            "SELECT path FROM nodes WHERE parent_id=? AND type=1", (folder_id,)
+            f"SELECT path FROM {file_table} WHERE parent_id=? AND type=1", (folder_id,)
         )
         for row in cursor.fetchall():
             sync_folder(conn, row[0], run_mode=run_mode, recursive=True, _depth=_depth + 1)

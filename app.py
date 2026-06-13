@@ -104,19 +104,22 @@ if config.RUN_MODE == 'douyin':
     logger.info(f"抖音默认静音: {config.DOUYIN_MUTED}")
 logger.info(f"分页配置: PAGE_FIRST={config.PAGE_FIRST}, PAGE_LOAD={config.PAGE_LOAD}")
 
-# ── 清理媒体表中非当前 MEDIA_DIR 的残留数据 ──
+# ── 清理媒体表中非当前 MEDIA_DIR 的残留数据，然后全量同步 3 张表 ──
 if config.RUN_MODE != 'normal' and config.MEDIA_DIR:
     try:
-        from utils.db_utils import get_db
+        from utils.db_utils import get_db, drive_prefix, sync_folder
         conn = get_db(config.DB_PATH)
         media_prefix = os.path.abspath(str(config.MEDIA_DIR)) + os.sep
-        for table in ('images', 'videos'):
+        prefix = drive_prefix(str(config.MEDIA_DIR))
+        for table in (f'{prefix}_p', f'{prefix}_v'):
             conn.execute(f"DELETE FROM {table} WHERE path NOT LIKE ?", (media_prefix + '%',))
         conn.commit()
+        # 全量同步：更新 d_file / d_v / d_p 全部三张表
+        sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE, recursive=True)
         conn.close()
-        logger.debug("媒体表残留数据清理完成")
+        logger.debug("启动同步完成：所有表已更新")
     except Exception:
-        logger.debug("媒体表残留数据清理失败（非致命）")
+        logger.debug("启动同步失败（非致命）")
 
 # ==================== 全局异常处理器 ====================
 from werkzeug.exceptions import HTTPException

@@ -40,46 +40,53 @@ def api_check_path():
 
 def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_type):
     """从 DB 读取文件列表，失败时返回 (False, None)"""
+    conn = None
     try:
         db_path = config.DB_PATH
         if not db_path:
             return False, None
 
-        from utils.db_utils import get_db, ensure_tables, sync_folder, get_children
+        from utils.db_utils import get_db, ensure_tables, sync_folder, \
+            get_children, drive_prefix
 
         conn = get_db(db_path)
-        ensure_tables(conn)
+        prefix = drive_prefix(requested_path)
+        file_table = f'{prefix}_file'
+        ensure_tables(conn, prefix=prefix)
         sync_folder(conn, requested_path, run_mode='normal')
 
         cursor = conn.execute(
-            "SELECT id FROM nodes WHERE path=? AND type=1", (requested_path,)
+            f"SELECT id FROM {file_table} WHERE path=? AND type=1", (requested_path,)
         )
         row = cursor.fetchone()
         if not row:
-            conn.close()
             return False, None
 
         parent_id = row[0]
-        children = get_children(conn, parent_id, sort_type, sort_order)
-        conn.close()
-
-        folders = [c for c in children if c['type'] == 1]
-        files_list = [c for c in children if c['type'] == 2]
 
         if item_type == 'folders':
+            order_col = 'modify_time' if sort_type == 'time' else 'name'
+            order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
+            rows = conn.execute(
+                f"SELECT name, path, modify_time FROM {file_table} "
+                f"WHERE parent_id=? AND type=1 ORDER BY {order_col} {order_dir}",
+                (parent_id,)
+            ).fetchall()
             result = []
-            for f in folders:
+            for r in rows:
                 result.append({
-                    'name': f['name'],
-                    'path': f['path'],
-                    'icon': '📁',
-                    'mtime': f['modify_time'],
+                    'name': r[0],
+                    'path': r[1],
+                    'icon': '\U0001f4c1',
+                    'mtime': r[2],
                     'size': 0,
-                    'date': (time.strftime('%Y-%m-%d %H:%M', time.localtime(f['modify_time']))
-                             if f['modify_time'] else '未知'),
+                    'date': (time.strftime('%Y-%m-%d %H:%M', time.localtime(r[2]))
+                             if r[2] else '未知'),
                 })
             return True, jsonify(result)
 
+        children = get_children(conn, file_table, parent_id, sort_type, sort_order)
+        files_list = [c for c in children if c['type'] == 2]
         total = len(files_list)
         paged = files_list[offset:offset + limit]
         items = []
@@ -107,6 +114,9 @@ def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_typ
     except Exception as e:
         logger.debug(f"DB 列表查询失败，回退到文件系统: {e}")
         return False, None
+    finally:
+        if conn:
+            conn.close()
 
 
 @normal_bp.route('/list')
@@ -151,7 +161,7 @@ def api_list():
                                 'mtime': mtime,
                                 'size': 0,
                                 'date': time.strftime('%Y-%m-%d %H:%M', time.localtime(mtime)) if mtime else '未知',
-                                'icon': '📁'
+                                'icon': '\U0001f4c1'
                             })
                         else:
                             try:

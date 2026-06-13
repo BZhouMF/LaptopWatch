@@ -16,8 +16,10 @@ media_bp = Blueprint('media_api', __name__, url_prefix='/media')
 
 
 def _media_table(run_mode):
-    """根据运行模式返回媒体表名"""
-    return 'videos' if run_mode in ('video', 'douyin') else 'images'
+    """根据运行模式返回 per-disk 媒体表名"""
+    from utils.db_utils import drive_prefix
+    prefix = drive_prefix(str(config.MEDIA_DIR)) if config.MEDIA_DIR else 'x'
+    return f'{prefix}_v' if run_mode in ('video', 'douyin') else f'{prefix}_p'
 
 
 def _db_load_more(offset, limit, is_random):
@@ -28,22 +30,32 @@ def _db_load_more(offset, limit, is_random):
             return False, None
 
         from utils.db_utils import get_db, ensure_tables, sync_folder, \
-            get_random_media, get_media_page_all
+            get_random_media, get_media_page_all, drive_prefix
 
         conn = get_db(db_path)
-        ensure_tables(conn)
+        prefix = drive_prefix(str(config.MEDIA_DIR))
+        ensure_tables(conn, prefix=prefix)
         # 确保 MEDIA_DIR 整棵树已同步
         if config.MEDIA_DIR:
-            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE, recursive=True)
+            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
 
         table = _media_table(config.RUN_MODE)
 
+        from utils.db_utils import _file_table_from_media_table
+        file_table = _file_table_from_media_table(table)
+        media_prefix = os.path.abspath(str(config.MEDIA_DIR)) + os.sep
+
+        # 查询总文件数（过滤媒体目录前缀，排除残留数据）
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM {table} m JOIN {file_table} n ON n.path = m.path "
+            f"WHERE n.type=2 AND m.path LIKE ?", (media_prefix + '%',)
+        ).fetchone()[0]
+
         if is_random:
             rows = get_random_media(conn, table, limit, media_dir=config.MEDIA_DIR)
-            total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             has_more = len(rows) == limit
         else:
-            rows, total = get_media_page_all(conn, table, limit, offset, media_dir=config.MEDIA_DIR)
+            rows, _ = get_media_page_all(conn, table, limit, offset, media_dir=config.MEDIA_DIR)
             has_more = (offset + len(rows)) < total
 
         conn.close()
@@ -70,6 +82,7 @@ def _db_load_more(offset, limit, is_random):
             'has_more': has_more,
             'next_offset': offset + len(data),
             'is_random': is_random,
+            'total': total,
         }
     except Exception as e:
         logger.debug(f"DB load_more 失败，回退到遍历: {e}")
@@ -83,9 +96,10 @@ def _db_thumbnail(target_path):
         if not db_path:
             return False, None, None
 
-        from utils.db_utils import get_db, ensure_tables, generate_and_cache_cover
+        from utils.db_utils import get_db, ensure_tables, generate_and_cache_cover, drive_prefix
         conn = get_db(db_path)
-        ensure_tables(conn)
+        prefix = drive_prefix(str(config.MEDIA_DIR))
+        ensure_tables(conn, prefix=prefix)
         table = _media_table(config.RUN_MODE)
         jpeg_bytes, mime = generate_and_cache_cover(conn, table, target_path)
         conn.close()
