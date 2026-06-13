@@ -6,74 +6,6 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
-class TestPickRandomMediaVideo:
-    """随机树下降算法测试"""
-
-    def test_returns_none_on_empty_root(self):
-        """媒体目录无文件时返回 None"""
-        from utils.media_utils import pick_random_media_video
-        from config import config
-
-        orig_mode = config.RUN_MODE
-        orig_dir = config.MEDIA_DIR
-        config.RUN_MODE = 'douyin'
-
-        test_root = Path(__file__).parent
-        config.MEDIA_DIR = test_root
-
-        # test/ 目录下没有视频文件，应返回 None
-        result = pick_random_media_video([])
-        assert result is None
-
-        config.RUN_MODE = orig_mode
-        config.MEDIA_DIR = orig_dir
-
-    def test_finds_video_when_exists(self, tmp_path):
-        """目录下有视频文件时能返回"""
-        from utils.media_utils import pick_random_media_video
-        from config import config
-
-        orig_mode = config.RUN_MODE
-        orig_dir = config.MEDIA_DIR
-        config.RUN_MODE = 'douyin'
-
-        # 创建临时目录结构
-        (tmp_path / 'sub').mkdir(parents=True, exist_ok=True)
-        (tmp_path / 'sub' / 'movie.mp4').write_text('fake video')
-        (tmp_path / 'sub' / 'readme.txt').write_text('not a video')
-
-        config.MEDIA_DIR = tmp_path
-
-        result = pick_random_media_video([])
-        assert result is not None
-        assert result['name'] == 'movie.mp4'
-
-        config.RUN_MODE = orig_mode
-        config.MEDIA_DIR = orig_dir
-
-    def test_skips_history(self, tmp_path):
-        """已看过的视频被跳过"""
-        from utils.media_utils import pick_random_media_video
-        from config import config
-
-        orig_mode = config.RUN_MODE
-        orig_dir = config.MEDIA_DIR
-        config.RUN_MODE = 'douyin'
-
-        (tmp_path / 'a.mp4').write_text('fake a')
-        (tmp_path / 'b.mp4').write_text('fake b')
-
-        config.MEDIA_DIR = tmp_path
-
-        history = [{'relative_path': 'a.mp4'}]
-        result = pick_random_media_video(history)
-        assert result is not None
-        assert result['name'] == 'b.mp4'
-
-        config.RUN_MODE = orig_mode
-        config.MEDIA_DIR = orig_dir
-
-
 class TestFormatFileItem:
     def test_format_video_file(self):
         from utils.media_utils import _format_file_item
@@ -145,16 +77,3 @@ class TestCollectFilesRecursive:
         for f in result:
             assert not f['name'].endswith('.py')
 
-
-class TestBuildVideoInfo:
-    def test_build_video_info(self):
-        from utils.media_utils import _build_video_info
-
-        info = _build_video_info({
-            'name': 'clip.mp4',
-            'rel_path': 'dir\\clip.mp4',
-            'mtime': 1700000000,
-        })
-        assert info['name'] == 'clip.mp4'
-        assert info['relative_path'] == 'dir/clip.mp4'
-        assert info['timestamp'] == 1700000000

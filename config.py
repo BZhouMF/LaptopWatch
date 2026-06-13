@@ -30,9 +30,6 @@ class Config:
     REGENERATE_RANDOM_ON_REFRESH = os.getenv('LAPTOPWATCH_REGENERATE_ON_REFRESH', 'false').lower() == 'true'
 
     # ==================== 抖音模式配置 ====================
-    # 是否启用随机媒体模式（true=每次滑动随机推送一个视频, false=按目录顺序或随机游走）
-    DOUYIN_RANDOM_MEDIA = os.getenv('LAPTOPWATCH_DOUYIN_RANDOM_MEDIA', 'false').lower() == 'true'
-    # 视频播放完毕后是否自动切换到下一个视频（true=自动下一个, false=从头循环当前视频）
     DOUYIN_AUTO_PLAY = os.getenv('LAPTOPWATCH_DOUYIN_AUTO_PLAY', 'true').lower() == 'true'
     # 是否默认静音（true=默认静音, false=默认有声音）
     DOUYIN_MUTED = os.getenv('LAPTOPWATCH_DOUYIN_MUTED', 'true').lower() == 'true'

@@ -10,61 +10,6 @@ from config import config
 from utils.logging_utils import logger
 from models.cache_models import cache_manager
 
-def get_sorted_folders():
-    """获取排序后的文件夹列表（带缓存）"""
-    if config.RUN_MODE not in ['video', 'image', 'douyin'] or not config.MEDIA_DIR or not config.MEDIA_DIR.exists():
-        return []
-
-    current_time = time.time()
-    cached = cache_manager.get_folders_cache(config.SORT_TYPE, config.SORT_ORDER)
-    if cached is not None:
-        return cached
-
-    folders = []
-    try:
-        root_stat = os.stat(str(config.MEDIA_DIR))
-        root_mtime = root_stat.st_mtime
-        root_folder = {
-            'path': str(config.MEDIA_DIR),
-            'rel_path': '',
-            'name': config.MEDIA_DIR.name,
-            'mtime': root_mtime
-        }
-        folders.append(root_folder)
-    except Exception as e:
-        from utils.logging_utils import logger
-        logger.error(f"获取根目录状态失败: {e}", exc_info=True)
-
-    try:
-        for root, dirs, _ in os.walk(str(config.MEDIA_DIR)):
-            for d in dirs:
-                full_path = os.path.join(root, d)
-                try:
-                    stat = os.stat(full_path)
-                    mtime = stat.st_mtime
-                except Exception:
-                    mtime = 0
-                rel_path = os.path.relpath(full_path, config.MEDIA_DIR)
-                folders.append({
-                    'path': full_path,
-                    'rel_path': rel_path,
-                    'name': d,
-                    'mtime': mtime
-                })
-    except Exception as e:
-        from utils.logging_utils import logger
-        logger.error(f"遍历文件夹失败: {e}", exc_info=True)
-
-    reverse = (config.SORT_ORDER == 'desc')
-    if config.SORT_TYPE == 'time':
-        folders.sort(key=lambda x: x['mtime'], reverse=reverse)
-    else:
-        folders.sort(key=lambda x: x['name'].lower(), reverse=reverse)
-
-    cache_manager.set_folders_cache(folders, config.SORT_TYPE, config.SORT_ORDER)
-
-    return folders
-
 
 def get_files_in_folder(folder_path):
     """获取文件夹中的媒体文件（带缓存）"""
@@ -86,7 +31,6 @@ def get_files_in_folder(folder_path):
                         stat = entry.stat()
                         media_dir_str = str(config.MEDIA_DIR)
                         rel_path = os.path.relpath(entry.path, media_dir_str)
-                        # 调试日志：检查rel_path是否为空
                         if not rel_path or rel_path == '.':
                             from utils.logging_utils import logger
                             logger.warning(f"get_files_in_folder: 异常相对路径 entry.path={entry.path}, MEDIA_DIR={media_dir_str}, rel_path={rel_path}")
@@ -113,6 +57,7 @@ def get_files_in_folder(folder_path):
     cache_manager.set_files_cache(folder_path, files, config.SORT_TYPE, config.SORT_ORDER)
 
     return files
+
 
 def _get_sorted_subfolders(folder_path):
     """获取排序后的子文件夹列表"""
@@ -162,84 +107,6 @@ def _format_file_item(f):
     item['is_image'] = ext in config.IMAGE_EXT
 
     return item
-
-
-def _build_video_info(f):
-    """将文件信息转为视频信息"""
-    return {
-        'name': f['name'],
-        'relative_path': f['rel_path'].replace(os.sep, '/'),
-        'timestamp': f['mtime']
-    }
-
-
-def get_video_at_offset(cursor):
-    """按偏移量获取单个视频文件，返回 (video_info, has_more)
-    每次调用会扫描文件夹列表并计数，依赖已有的文件夹/文件缓存（60s），无额外存储"""
-    folders = get_sorted_folders()
-    count = 0
-    for folder in folders:
-        files = get_files_in_folder(folder['path'])
-        for f in files:
-            ext = os.path.splitext(f['name'])[1].lower()
-            if ext not in config.VIDEO_EXT:
-                continue
-            if count == cursor:
-                return _build_video_info(f), True
-            count += 1
-    return None, False
-
-
-def pick_random_media_video(history):
-    """随机媒体模式：随机树下降算法。
-
-    每层将当前目录的（视频文件 + 子文件夹）混合随机选择，
-    命中文件且未看过则返回，命中文件夹则下钻，
-    无文件或全部已看过则回溯到父级继续。
-    典型 IO 开销仅 3-5 次 scandir 而非全量 os.walk。
-    """
-    root_path = config.MEDIA_DIR
-    target_ext = config.VIDEO_EXT
-    history_set = {h.get('relative_path', '') for h in history} if history else set()
-
-    def _descend(folder_path, depth=0):
-        if depth > 200:
-            return None
-
-        files = get_files_in_folder(folder_path)
-        subfolders = _get_sorted_subfolders(folder_path)
-
-        # 当前目录未看过的文件
-        unseen = []
-        for f in files:
-            ext = os.path.splitext(f['name'])[1].lower()
-            if ext not in target_ext:
-                continue
-            if f['rel_path'].replace(os.sep, '/') not in history_set:
-                unseen.append(f)
-
-        if not subfolders:
-            # 叶子文件夹：从本层文件随机选
-            if unseen:
-                return _build_video_info(random.choice(unseen))
-            return None
-
-        # 有子文件夹：文件 + 文件夹混合随机池
-        pool = [('file', f) for f in unseen]
-        pool.extend([('folder', s) for s in subfolders])
-        random.shuffle(pool)
-
-        for kind, item in pool:
-            if kind == 'folder':
-                result = _descend(item['path'], depth + 1)
-                if result:
-                    return result
-            else:
-                return _build_video_info(item)
-
-        return None
-
-    return _descend(str(root_path))
 
 
 # ==================== 目录浏览模式工具函数 ====================
@@ -488,54 +355,6 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
         result['single_leaf_override'] = result['categories'][0]['is_leaf']
 
     return result
-
-
-def get_grid_page_files(folder_path, offset, limit, run_mode):
-    """
-    获取叶子文件夹的分页文件（用于网格页面）。
-    返回 (files_list, total_count, has_more)
-    """
-    if isinstance(folder_path, str):
-        folder_path = Path(folder_path)
-
-    target_ext = config.VIDEO_EXT if run_mode in ('video', 'douyin') else config.IMAGE_EXT
-
-    # 获取所有文件
-    all_files = []
-    try:
-        with os.scandir(str(folder_path)) as entries:
-            for entry in entries:
-                if entry.is_file() and entry.name.lower().endswith(tuple(target_ext)):
-                    try:
-                        stat = entry.stat()
-                        media_dir_str = str(config.MEDIA_DIR)
-                        rel_path = os.path.relpath(entry.path, media_dir_str)
-                        all_files.append({
-                            'name': entry.name,
-                            'path': entry.path,
-                            'rel_path': rel_path,
-                            'mtime': stat.st_mtime,
-                            'size': stat.st_size
-                        })
-                    except Exception:
-                        continue
-    except Exception as e:
-        logger.warning(f"扫描文件夹失败 {folder_path}: {e}")
-
-    # 排序
-    reverse = (config.SORT_ORDER == 'desc')
-    if config.SORT_TYPE == 'time':
-        all_files.sort(key=lambda x: x['mtime'], reverse=reverse)
-    else:
-        all_files.sort(key=lambda x: x['name'].lower(), reverse=reverse)
-
-    total = len(all_files)
-    page_files = all_files[offset:offset + limit]
-
-    formatted = [_format_file_item(f) for f in page_files]
-    has_more = (offset + limit) < total
-
-    return formatted, total, has_more
 
 
 def check_browse_would_redirect(folder_path):

@@ -121,12 +121,10 @@ def browse(dirpath):
         # 实时增量同步：用户点击时仅核对当前文件夹
         if config.MEDIA_DIR and config.DB_PATH:
             try:
-                db_path = config.DB_PATH
-                if os.path.exists(os.path.dirname(db_path)):
-                    from media_scanner import sync_folder, get_db
-                    db_conn = get_db(db_path)
-                    sync_folder(db_conn, abs_path)
-                    db_conn.close()
+                from utils.db_utils import get_db, sync_folder
+                db_conn = get_db(config.DB_PATH)
+                sync_folder(db_conn, abs_path, run_mode='normal')
+                db_conn.close()
             except Exception:
                 pass  # 同步失败不影响浏览
 

@@ -10,7 +10,7 @@ var currentPage = MEDIA_CONFIG.currentPage;
 var pageFirst = MEDIA_CONFIG.pageFirst;
 var currentController = null;
 var isRandomMode = MEDIA_CONFIG.isRandom;
-var isTraversalMode = MEDIA_CONFIG.isTraversal || isRandomMode;
+var isTraversalMode = isRandomMode;
 var pageCache = MEDIA_PAGE_CACHE;
 
 function openMedia(relativePath) {

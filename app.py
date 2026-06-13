@@ -100,7 +100,6 @@ logger.info(f"启动模式: {config.RUN_MODE}")
 if config.RUN_MODE != 'normal' and config.MEDIA_DIR:
     logger.info(f"媒体目录: {config.MEDIA_DIR}")
 if config.RUN_MODE == 'douyin':
-    logger.info(f"抖音随机媒体: {config.DOUYIN_RANDOM_MEDIA}")
     logger.info(f"抖音自动播放: {config.DOUYIN_AUTO_PLAY}")
     logger.info(f"抖音默认静音: {config.DOUYIN_MUTED}")
 logger.info(f"分页配置: PAGE_FIRST={config.PAGE_FIRST}, PAGE_LOAD={config.PAGE_LOAD}")

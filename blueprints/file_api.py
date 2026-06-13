@@ -96,6 +96,8 @@ def view_text_file(filepath):
         if content is None:
             return "无法识别编码", 400
 
+        decoded_filepath = urllib.parse.unquote(filepath)
+
         # 记录查看文本文件的绝对路径
         log_access(request, 'VIEW_TEXT_ABS', abs_path, details=f"原始路径: {filepath}")
 

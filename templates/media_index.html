@@ -133,8 +133,7 @@
             hasMore: {{ has_more|tojson|safe }},
             totalPages: {{ total_pages }},
             currentPage: {{ current_page }},
-            isRandom: {{ config.RANDOM_MODE|tojson|safe }},
-            isTraversal: {{ config.RANDOM_MODE|tojson|safe }}
+            isRandom: {{ config.RANDOM_MODE|tojson|safe }}
         };
         var MEDIA_PAGE_CACHE = {};
         MEDIA_PAGE_CACHE[1] = {
