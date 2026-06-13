@@ -33,7 +33,7 @@ def _db_get_conn(run_mode, folder_path):
         conn = get_db(db_path)
         ensure_tables(conn)
         if config.MEDIA_DIR:
-            sync_folder(conn, str(folder_path), run_mode=run_mode)
+            sync_folder(conn, str(folder_path), run_mode=run_mode, recursive=True)
         return conn
     except Exception:
         return None
