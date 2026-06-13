@@ -223,6 +223,36 @@ def get_media_page(conn, table, parent_id, limit, offset):
     )
 
 
+def get_media_page_all(conn, table, limit, offset):
+    """从整个媒体表分页取数据（按 path 排序实现文件夹分组）
+
+    返回 (rows, total_count)
+    rows 为 list[dict] — id/parent_id/name/path/modify_time
+    """
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM {table}"
+    ).fetchone()[0]
+
+    rows = conn.execute(
+        f"""SELECT id, parent_id, name, path, modify_time
+            FROM {table}
+            ORDER BY path ASC
+            LIMIT ? OFFSET ?""",
+        (limit, offset),
+    ).fetchall()
+
+    return (
+        [
+            {
+                'id': r[0], 'parent_id': r[1], 'name': r[2],
+                'path': r[3], 'modify_time': r[4],
+            }
+            for r in rows
+        ],
+        total,
+    )
+
+
 def get_random_media(conn, table, limit, exclude_paths=None):
     """从媒体表随机取 N 条，可排除指定路径
 

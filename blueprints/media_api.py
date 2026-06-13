@@ -14,17 +14,107 @@ from blueprints.auth import login_required, require_mode
 
 media_bp = Blueprint('media_api', __name__, url_prefix='/media')
 
+
+def _media_table(run_mode):
+    """根据运行模式返回媒体表名"""
+    return 'videos' if run_mode in ('video', 'douyin') else 'images'
+
+
+def _db_load_more(offset, limit, is_random):
+    """从 DB 加载媒体文件，返回 (success, response_dict)"""
+    try:
+        db_path = config.DB_PATH
+        if not db_path:
+            return False, None
+
+        from utils.db_utils import get_db, ensure_tables, sync_folder, \
+            get_random_media, get_media_page_all
+
+        conn = get_db(db_path)
+        ensure_tables(conn)
+        # 确保 MEDIA_DIR 根目录已同步
+        if config.MEDIA_DIR:
+            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+
+        table = _media_table(config.RUN_MODE)
+
+        if is_random:
+            rows = get_random_media(conn, table, limit)
+            total = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            has_more = len(rows) == limit
+        else:
+            rows, total = get_media_page_all(conn, table, limit, offset)
+            has_more = (offset + len(rows)) < total
+
+        conn.close()
+
+        media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
+        data = []
+        for r in rows:
+            path = r['path'].replace('\\', '/')
+            rel_path = path.replace(media_dir_str, '', 1) if media_dir_str else path
+            ext = os.path.splitext(r['name'])[1].lower()
+            from datetime import datetime
+            data.append({
+                'name': r['name'],
+                'relative_path': rel_path,
+                'mtime': datetime.fromtimestamp(r['modify_time']).strftime('%Y-%m-%d %H:%M:%S'),
+                'timestamp': r['modify_time'],
+                'is_video': ext in config.VIDEO_EXT,
+                'is_image': ext in config.IMAGE_EXT,
+            })
+
+        return True, {
+            'code': 0,
+            'data': data,
+            'has_more': has_more,
+            'next_offset': offset + len(data),
+            'is_random': is_random,
+        }
+    except Exception as e:
+        logger.debug(f"DB load_more 失败，回退到遍历: {e}")
+        return False, None
+
+
+def _db_thumbnail(target_path):
+    """从 DB 读取或生成 cover，返回 (success, jpeg_bytes, mime_type)"""
+    try:
+        db_path = config.DB_PATH
+        if not db_path:
+            return False, None, None
+
+        from utils.db_utils import get_db, ensure_tables, generate_and_cache_cover
+        conn = get_db(db_path)
+        ensure_tables(conn)
+        table = _media_table(config.RUN_MODE)
+        jpeg_bytes, mime = generate_and_cache_cover(conn, table, target_path)
+        conn.close()
+
+        if jpeg_bytes:
+            return True, jpeg_bytes, mime
+        return False, None, None
+    except Exception as e:
+        logger.debug(f"DB thumbnail 失败: {e}")
+        return False, None, None
+
 @media_bp.route('/load_more')
 @login_required
 @require_mode('video', 'image', 'douyin')
 def load_more():
-    """加载更多媒体文件"""
+    """加载更多媒体文件（DB 优先，回退到遍历）"""
     start_time = time.time()
     try:
         offset = int(request.args.get('offset', config.PAGE_FIRST))
         limit = int(request.args.get('limit', config.PAGE_LOAD))
+        is_random = config.RANDOM_MODE
 
-        if config.RANDOM_MODE:
+        # DB 优先
+        db_ok, db_result = _db_load_more(offset, limit, is_random)
+        if db_ok:
+            return jsonify(db_result)
+
+        # 回退到遍历
+        if is_random:
             if 'traversal_id' not in session:
                 logger.error("load_more 随机模式：遍历状态不存在")
                 return jsonify({'code': 1, 'msg': '遍历状态不存在，请刷新页面'})
@@ -72,7 +162,7 @@ def load_more():
 @login_required
 @require_mode('video', 'image', 'douyin')
 def api_thumbnail(relative_path):
-    """生成并返回媒体文件缩略图，支持媒体模式相对路径和普通模式绝对路径"""
+    """生成并返回媒体文件缩略图（DB cover 优先，回退到实时生成）"""
     from utils.thumbnail_utils import generate_thumbnail
     from pathlib import Path
     import base64
@@ -102,7 +192,18 @@ def api_thumbnail(relative_path):
         if not target.is_file():
             return '', 404
 
-    thumb = generate_thumbnail(str(target))
+    target_str = str(target)
+
+    # DB cover 优先
+    db_ok, jpeg_bytes, mime = _db_thumbnail(target_str)
+    if db_ok and jpeg_bytes:
+        return jpeg_bytes, 200, {
+            'Content-Type': mime or 'image/jpeg',
+            'Cache-Control': 'public, max-age=3600'
+        }
+
+    # 回退到实时生成
+    thumb = generate_thumbnail(target_str)
     if thumb:
         mime_type, thumb_data = thumb
         return base64.b64decode(thumb_data), 200, {

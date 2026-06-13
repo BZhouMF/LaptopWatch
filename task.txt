@@ -174,7 +174,7 @@ SQL 查询替代递归 scandir，每分类块取 CATEGORY_PAGE_SIZE 条。
 
 ---
 
-#### [ ] 任务 3.2：media_api.py — /media/load_more + thumbnail 走 DB
+#### [x] 任务 3.2：media_api.py — /media/load_more + thumbnail 走 DB
 
 **目标**：媒体模式分页和缩略图从 DB 读取
 
