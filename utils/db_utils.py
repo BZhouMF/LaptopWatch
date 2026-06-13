@@ -159,6 +159,99 @@ def _delete_cascade(conn, node_id):
 
 # ── 公开 API ──────────────────────────────────────────────
 
+# ── 查询接口 ──────────────────────────────────────────────
+
+
+def get_children(conn, parent_id, sort_type='name', sort_order='asc'):
+    """返回某文件夹下所有子项，文件夹在前、文件在后
+
+    sort_type: 'name' | 'time'
+    sort_order: 'asc' | 'desc'
+    返回 list[dict] — id/parent_id/name/type/path/size/extension/modify_time/is_hidden
+    """
+    order_col = 'modify_time' if sort_type == 'time' else 'name'
+    order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
+
+    rows = conn.execute(
+        f"""SELECT id, parent_id, name, type, path, size, extension,
+                   modify_time, is_hidden
+            FROM nodes
+            WHERE parent_id=?
+            ORDER BY type ASC, {order_col} {order_dir}""",
+        (parent_id,),
+    ).fetchall()
+
+    return [
+        {
+            'id': r[0], 'parent_id': r[1], 'name': r[2], 'type': r[3],
+            'path': r[4], 'size': r[5], 'extension': r[6],
+            'modify_time': r[7], 'is_hidden': bool(r[8]),
+        }
+        for r in rows
+    ]
+
+
+def get_media_page(conn, table, parent_id, limit, offset):
+    """分页取媒体文件（images 或 videos 表）
+
+    返回 (rows, total_count)
+    rows 为 list[dict] — id/parent_id/name/path/modify_time
+    """
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM {table} WHERE parent_id=?", (parent_id,)
+    ).fetchone()[0]
+
+    rows = conn.execute(
+        f"""SELECT id, parent_id, name, path, modify_time
+            FROM {table}
+            WHERE parent_id=?
+            ORDER BY name ASC
+            LIMIT ? OFFSET ?""",
+        (parent_id, limit, offset),
+    ).fetchall()
+
+    return (
+        [
+            {
+                'id': r[0], 'parent_id': r[1], 'name': r[2],
+                'path': r[3], 'modify_time': r[4],
+            }
+            for r in rows
+        ],
+        total,
+    )
+
+
+def get_random_media(conn, table, limit, exclude_paths=None):
+    """从媒体表随机取 N 条，可排除指定路径
+
+    返回 list[dict] — id/parent_id/name/path/modify_time
+    """
+    if exclude_paths:
+        placeholders = ','.join('?' for _ in exclude_paths)
+        rows = conn.execute(
+            f"""SELECT id, parent_id, name, path, modify_time
+                FROM {table}
+                WHERE path NOT IN ({placeholders})
+                ORDER BY RANDOM() LIMIT ?""",
+            (*exclude_paths, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"""SELECT id, parent_id, name, path, modify_time
+                FROM {table}
+                ORDER BY RANDOM() LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    return [
+        {
+            'id': r[0], 'parent_id': r[1], 'name': r[2],
+            'path': r[3], 'modify_time': r[4],
+        }
+        for r in rows
+    ]
+
 
 def sync_folder(conn, folder_path, run_mode='normal'):
     """增量同步单个文件夹（仅 scandir 1 层），不递归"""
