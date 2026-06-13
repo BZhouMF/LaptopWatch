@@ -97,8 +97,6 @@ class AppLauncher(tk.Tk):
         self.douyin_random_media_var = tk.BooleanVar(value=False)
         # 目录浏览模式变量
         self.category_browse_var = tk.BooleanVar(value=False)
-        # 数据库缓存变量
-        self.db_cache_var = tk.BooleanVar(value=True)
 
         # 设置现代样式
         self._setup_styles()
@@ -403,17 +401,11 @@ class AppLauncher(tk.Tk):
             command=self._on_category_browse_check_toggle)
         self.category_browse_check.pack(side='left')
 
-        # 数据库缓存配置
+        # 数据库目录快捷入口
         db_sep = tk.Frame(self.media_inner, bg=self.border_color, height=1)
         db_sep.pack(fill='x', pady=(8, 8))
         db_row = tk.Frame(self.media_inner, bg=self.card_bg)
         db_row.pack(fill='x')
-        self.db_cache_check = tk.Checkbutton(
-            db_row, text='启用数据库缓存', variable=self.db_cache_var,
-            bg=self.card_bg, fg=self.text_primary, font=('Segoe UI', 10),
-            selectcolor=self.card_bg, activebackground=self.card_bg,
-            activeforeground=self.text_primary)
-        self.db_cache_check.pack(side='left', padx=(0, 8))
         self.db_open_btn = ttk.Button(
             db_row, text='打开数据库目录', style='Secondary.TButton',
             command=self._open_db_dir, width=14)
@@ -611,14 +603,12 @@ class AppLauncher(tk.Tk):
         self.random_check.config(state='disabled')
         self.douyin_random_media_check.config(state='disabled')
         self.category_browse_check.config(state='disabled')
-        self.db_cache_check.config(state='disabled')
         self.db_open_btn.config(state='disabled')
 
     def _enable_config_controls(self):
         """停止服务后启用所有配置控件"""
         for btn in self._mode_buttons.values():
             btn.config(state='normal')
-        self.db_cache_check.config(state='normal')
         self.db_open_btn.config(state='normal')
         self._on_mode_change()
 
@@ -712,8 +702,6 @@ class AppLauncher(tk.Tk):
         env['LAPTOPWATCH_RANDOM'] = 'true' if self.random_var.get() else 'false'
         # 目录浏览模式标志
         env['LAPTOPWATCH_CATEGORY_BROWSE'] = 'true' if self.category_browse_var.get() else 'false'
-        # ==================== 数据库缓存标志 ====================
-        env['LAPTOPWATCH_DB_CACHE'] = 'true' if self.db_cache_var.get() else 'false'
         # ==================== 抖音模式配置 ====================
         if current_mode == 'douyin':
             env['LAPTOPWATCH_DOUYIN_RANDOM_MEDIA'] = 'true' if self.douyin_random_media_var.get() else 'false'
