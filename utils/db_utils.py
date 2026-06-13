@@ -1,7 +1,8 @@
-"""数据库连接、表创建与增量同步"""
+"""数据库连接、表创建、增量同步与封面缓存"""
 import os
 import time
 import sqlite3
+from io import BytesIO
 
 from config import config
 
@@ -251,6 +252,108 @@ def get_random_media(conn, table, limit, exclude_paths=None):
         }
         for r in rows
     ]
+
+
+# ── 封面读写 ─────────────────────────────────────────────
+
+
+def get_cover(conn, table, path):
+    """查询某个文件的 cover BLOB，返回 bytes 或 None"""
+    cursor = conn.execute(
+        f"SELECT cover FROM {table} WHERE path=?", (path,)
+    )
+    row = cursor.fetchone()
+    return row[0] if row and row[0] else None
+
+
+def set_cover(conn, table, path, cover_data):
+    """写入 cover BLOB"""
+    conn.execute(
+        f"UPDATE {table} SET cover=? WHERE path=?", (cover_data, path)
+    )
+    conn.commit()
+
+
+def generate_and_cache_cover(conn, table, filepath):
+    """生成缩略图 → 写入 DB → 返回 JPEG bytes
+
+    如果 DB 中已有 cover 则直接返回，不重复生成。
+    table: 'images' | 'videos'
+    返回 (jpeg_bytes, mime_type) 或 (None, None)
+    """
+    # 查缓存
+    cover = get_cover(conn, table, filepath)
+    if cover:
+        return cover, 'image/jpeg'
+
+    ext = os.path.splitext(filepath)[1].lower()
+    is_image = ext in config.IMAGE_EXT
+    is_video = ext in config.VIDEO_EXT
+
+    if not is_image and not is_video:
+        return None, None
+
+    try:
+        from PIL import Image as PilImage
+    except ImportError:
+        PilImage = None
+
+    if PilImage is None:
+        return None, None
+
+    img = None
+    try:
+        if is_image:
+            try:
+                im = PilImage.open(filepath)
+                im.thumbnail(config.THUMBNAIL_SIZE, PilImage.Resampling.LANCZOS)
+                img = im
+            except Exception:
+                return None, None
+        elif is_video:
+            try:
+                import cv2
+                cap = cv2.VideoCapture(filepath)
+                if not cap.isOpened():
+                    return None, None
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                mid_frame = total_frames // 2 if total_frames > 0 else 0
+                cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame)
+                ret, frame = cap.read()
+                cap.release()
+                if not ret:
+                    return None, None
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                im = PilImage.fromarray(frame_rgb)
+                im.thumbnail(config.THUMBNAIL_SIZE, PilImage.Resampling.LANCZOS)
+                img = im
+            except Exception:
+                return None, None
+
+        if img is None:
+            return None, None
+
+        if img.mode in ('RGBA', 'P'):
+            bg = PilImage.new('RGB', img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = bg
+
+        buf = BytesIO()
+        img.save(buf, format='JPEG', quality=70)
+        jpeg_bytes = buf.getvalue()
+
+        # 确保行存在并写入 cover
+        conn.execute(
+            f"""INSERT INTO {table} (parent_id, name, path, modify_time, cover)
+                VALUES (0, ?, ?, ?, ?)
+                ON CONFLICT(path) DO UPDATE SET cover=excluded.cover""",
+            (os.path.basename(filepath), filepath, os.path.getmtime(filepath), jpeg_bytes),
+        )
+        conn.commit()
+        return jpeg_bytes, 'image/jpeg'
+
+    except Exception:
+        return None, None
 
 
 def sync_folder(conn, folder_path, run_mode='normal'):
