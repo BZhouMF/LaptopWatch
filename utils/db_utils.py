@@ -284,6 +284,98 @@ def get_random_media(conn, table, limit, exclude_paths=None):
     ]
 
 
+def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
+    """获取某个节点的直接子文件夹列表
+
+    返回 list[dict] — id/name/path
+    """
+    order_col = 'modify_time' if sort_type == 'time' else 'name'
+    order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
+    rows = conn.execute(
+        f"""SELECT id, name, path
+            FROM nodes
+            WHERE parent_id=? AND type=1
+            ORDER BY {order_col} {order_dir}""",
+        (parent_id,),
+    ).fetchall()
+    return [{'id': r[0], 'name': r[1], 'path': r[2]} for r in rows]
+
+
+def get_node_by_path(conn, path):
+    """根据路径查找 nodes 表中的节点，返回 dict 或 None"""
+    cursor = conn.execute(
+        "SELECT id, parent_id, name, type, path FROM nodes WHERE path=?", (path,)
+    )
+    row = cursor.fetchone()
+    if row:
+        return {'id': row[0], 'parent_id': row[1], 'name': row[2],
+                'type': row[3], 'path': row[4]}
+    return None
+
+
+def get_media_in_folder(conn, table, folder_path, limit, offset,
+                        sort_type='name', sort_order='asc'):
+    """获取文件夹（递归含子文件夹）中的媒体文件，分页
+
+    通过 path 前缀匹配 + nodes 关联实现递归查询，只返回文件（type=2）。
+    返回 (rows, total_count)
+    rows 为 list[dict] — id/parent_id/name/path/modify_time
+    """
+    norm_path = os.path.normpath(folder_path)
+    prefix = norm_path + os.sep
+    order_col = 'modify_time' if sort_type == 'time' else 'name'
+    order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
+
+    total = conn.execute(
+        f"""SELECT COUNT(*) FROM {table} m
+            JOIN nodes n ON n.path = m.path
+            WHERE m.path LIKE ? AND n.type=2""",
+        (prefix + '%',)
+    ).fetchone()[0]
+
+    rows = conn.execute(
+        f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
+            FROM {table} m
+            JOIN nodes n ON n.path = m.path
+            WHERE m.path LIKE ? AND n.type=2
+            ORDER BY {order_col} {order_dir}
+            LIMIT ? OFFSET ?""",
+        (prefix + '%', limit, offset),
+    ).fetchall()
+
+    return (
+        [
+            {
+                'id': r[0], 'parent_id': r[1], 'name': r[2],
+                'path': r[3], 'modify_time': r[4],
+            }
+            for r in rows
+        ],
+        total,
+    )
+
+
+def get_random_media_in_folder(conn, table, folder_path, limit):
+    """从文件夹（递归含子文件夹）中随机取媒体文件（仅文件）"""
+    norm_path = os.path.normpath(folder_path)
+    prefix = norm_path + os.sep
+    rows = conn.execute(
+        f"""SELECT m.id, m.parent_id, m.name, m.path, m.modify_time
+            FROM {table} m
+            JOIN nodes n ON n.path = m.path
+            WHERE m.path LIKE ? AND n.type=2
+            ORDER BY RANDOM() LIMIT ?""",
+        (prefix + '%', limit),
+    ).fetchall()
+    return [
+        {
+            'id': r[0], 'parent_id': r[1], 'name': r[2],
+            'path': r[3], 'modify_time': r[4],
+        }
+        for r in rows
+    ]
+
+
 # ── 封面读写 ─────────────────────────────────────────────
 
 

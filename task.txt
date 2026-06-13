@@ -208,7 +208,7 @@ SQL 查询替代递归 scandir，每分类块取 CATEGORY_PAGE_SIZE 条。
 
 ---
 
-#### [ ] 任务 3.4：category_api.py — 走 DB
+#### [x] 任务 3.4：category_api.py — 走 DB
 
 **目标**：目录浏览模式从 DB 读取，不再递归 scandir
 
