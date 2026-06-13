@@ -27,7 +27,7 @@ class Config:
 
     # ==================== 随机模式配置 ====================
     # 每次刷新网页是否重新生成随机起始位置
-    REGENERATE_RANDOM_ON_REFRESH = os.getenv('LAPTOPWATCH_REGENERATE_ON_REFRESH', 'true').lower() == 'true'
+    REGENERATE_RANDOM_ON_REFRESH = os.getenv('LAPTOPWATCH_REGENERATE_ON_REFRESH', 'false').lower() == 'true'
 
     # ==================== 抖音模式配置 ====================
     # 是否启用随机媒体模式（true=每次滑动随机推送一个视频, false=按目录顺序或随机游走）
@@ -111,6 +111,17 @@ class Config:
     @property
     def STATIC_URL_PATH(self):
         return '/static'
+
+    @property
+    def DB_PATH(self):
+        """数据库路径，与 media_scanner.py 保持一致"""
+        scan_dir = str(self.MEDIA_DIR) if self.MEDIA_DIR else ''
+        if scan_dir:
+            basename = os.path.basename(scan_dir)
+            db_name = f"{basename if basename else scan_dir[0]}.db"
+        else:
+            db_name = 'media.db'
+        return str(self.get_base_path() / 'db_path' / db_name)
 
 # 创建全局配置实例
 config = Config()
