@@ -38,6 +38,77 @@ def api_check_path():
     finally:
         log_access(request, 'CHECK_PATH', locals().get('path', ''), duration=time.time() - start_time)
 
+def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_type):
+    """从 DB 读取文件列表，失败时返回 (False, None)"""
+    try:
+        db_path = config.DB_PATH
+        if not db_path:
+            return False, None
+
+        from utils.db_utils import get_db, ensure_tables, sync_folder, get_children
+
+        conn = get_db(db_path)
+        ensure_tables(conn)
+        sync_folder(conn, requested_path, run_mode='normal')
+
+        cursor = conn.execute(
+            "SELECT id FROM nodes WHERE path=? AND type=1", (requested_path,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False, None
+
+        parent_id = row[0]
+        children = get_children(conn, parent_id, sort_type, sort_order)
+        conn.close()
+
+        folders = [c for c in children if c['type'] == 1]
+        files_list = [c for c in children if c['type'] == 2]
+
+        if item_type == 'folders':
+            result = []
+            for f in folders:
+                result.append({
+                    'name': f['name'],
+                    'path': f['path'],
+                    'icon': '📁',
+                    'mtime': f['modify_time'],
+                    'size': 0,
+                    'date': (time.strftime('%Y-%m-%d %H:%M', time.localtime(f['modify_time']))
+                             if f['modify_time'] else '未知'),
+                })
+            return True, jsonify(result)
+
+        total = len(files_list)
+        paged = files_list[offset:offset + limit]
+        items = []
+        for f in paged:
+            ext = f['extension'] or ''
+            is_video = ext in config.VIDEO_EXT
+            is_image = ext in config.IMAGE_EXT
+            is_text = ext in ['.txt', '.py', '.html', '.css', '.js', '.json', '.xml', '.md']
+            items.append({
+                'name': f['name'],
+                'path': f['path'],
+                'thumb': None,
+                'icon': get_icon(f['name']),
+                'is_video': is_video,
+                'is_image': is_image,
+                'is_previewable': (is_image or is_video) and (not is_image or f['size'] <= config.MAX_IMAGE_SIZE),
+                'is_text_readable': is_text and f['size'] < 1024 * 1024,
+                'raw_url': f"/file/raw/{f['path'].replace(os.sep, '/')}",
+                'date': (time.strftime('%Y-%m-%d %H:%M', time.localtime(f['modify_time']))
+                         if f['modify_time'] else '未知'),
+                'size': sizeof_fmt(f['size']),
+            })
+        return True, jsonify({'items': items, 'has_more': offset + limit < total})
+
+    except Exception as e:
+        logger.debug(f"DB 列表查询失败，回退到文件系统: {e}")
+        return False, None
+
+
 @normal_bp.route('/list')
 @login_required
 @require_mode('normal')
@@ -56,6 +127,12 @@ def api_list():
             path = urllib.parse.unquote(path)
         if not path or not os.path.exists(path):
             return jsonify({'error': '路径无效'}), 400
+
+        # DB 缓存优先
+        db_ok, db_result = _list_from_db(path, sort, order, offset, limit, typ)
+        if db_ok:
+            return db_result
+
         folders, files = [], []
         try:
             with os.scandir(path) as entries:
