@@ -21,6 +21,7 @@ def app(temp_dir):
     """Flask 应用，douyin 模式 + 测试媒体目录"""
     config.RUN_MODE = 'douyin'
     config.MEDIA_DIR = Path(temp_dir)
+    config.DB_PATH = os.path.join(temp_dir, 'test.db')
 
     from flask import Flask
     app = Flask(__name__)
@@ -31,7 +32,8 @@ def app(temp_dir):
     from blueprints.douyin_api import douyin_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(douyin_bp)
-    return app
+    yield app
+    config.DB_PATH = None
 
 
 @pytest.fixture

@@ -109,16 +109,18 @@ class Config:
     def STATIC_URL_PATH(self):
         return '/static'
 
+    _db_path_override = None
+
     @property
     def DB_PATH(self):
-        """数据库路径，自动创建"""
-        scan_dir = str(self.MEDIA_DIR) if self.MEDIA_DIR else ''
-        if scan_dir:
-            basename = os.path.basename(scan_dir)
-            db_name = f"{basename if basename else scan_dir[0]}.db"
-        else:
-            db_name = 'media.db'
-        return str(self.get_base_path() / 'db_path' / db_name)
+        """固定单一数据库路径（测试可覆盖）"""
+        if self._db_path_override:
+            return self._db_path_override
+        return str(self.get_base_path() / 'db_path' / 'laptopwatch.db')
+
+    @DB_PATH.setter
+    def DB_PATH(self, value):
+        self._db_path_override = value
 
 # 创建全局配置实例
 config = Config()

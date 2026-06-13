@@ -22,6 +22,7 @@ def app(temp_dir):
     config.RUN_MODE = 'video'
     config.RANDOM_MODE = False
     config.MEDIA_DIR = Path(temp_dir)
+    config.DB_PATH = os.path.join(temp_dir, 'test.db')
 
     from flask import Flask
     app = Flask(__name__)
@@ -31,7 +32,8 @@ def app(temp_dir):
     from blueprints.media_api import media_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(media_bp)
-    return app
+    yield app
+    config.DB_PATH = None
 
 
 @pytest.fixture

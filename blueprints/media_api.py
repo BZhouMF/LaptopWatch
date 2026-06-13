@@ -32,9 +32,9 @@ def _db_load_more(offset, limit, is_random):
 
         conn = get_db(db_path)
         ensure_tables(conn)
-        # 确保 MEDIA_DIR 根目录已同步
+        # 确保 MEDIA_DIR 整棵树已同步
         if config.MEDIA_DIR:
-            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE, recursive=True)
 
         table = _media_table(config.RUN_MODE)
 

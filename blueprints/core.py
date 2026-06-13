@@ -58,7 +58,7 @@ def index():
                     conn = get_db(db_path)
                     ensure_tables(conn)
                     if config.MEDIA_DIR:
-                        sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+                        sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE, recursive=True)
 
                     table = 'videos' if config.RUN_MODE in ('video', 'douyin') else 'images'
                     if config.RANDOM_MODE:

@@ -18,10 +18,20 @@ def temp_dir():
 
 
 @pytest.fixture
-def app(temp_dir):
+def db_path():
+    """独立 DB 路径，与 MEDIA_DIR 分离，避免同步时把 DB 文件列入文件列表"""
+    _dir = tempfile.mkdtemp()
+    yield os.path.join(_dir, 'test.db')
+    import shutil
+    shutil.rmtree(_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def app(temp_dir, db_path):
     """Flask 应用实例，normal 模式 + 测试 MEDIA_DIR"""
     config.RUN_MODE = 'normal'
     config.MEDIA_DIR = Path(temp_dir)
+    config.DB_PATH = db_path
 
     from flask import Flask
     app = Flask(__name__)
@@ -31,7 +41,8 @@ def app(temp_dir):
     from blueprints.normal_api import normal_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(normal_bp)
-    return app
+    yield app
+    config.DB_PATH = None
 
 
 @pytest.fixture

@@ -483,8 +483,13 @@ def generate_and_cache_cover(conn, table, filepath):
         return None, None
 
 
-def sync_folder(conn, folder_path, run_mode='normal'):
-    """增量同步单个文件夹（仅 scandir 1 层），不递归"""
+def sync_folder(conn, folder_path, run_mode='normal', recursive=False, _depth=0):
+    """增量同步单个文件夹（仅 scandir 1 层），可选递归同步子文件夹
+
+    当 recursive=True 时递归同步所有后代子文件夹，_depth 用于限制递归深度。
+    """
+    if _depth > 50:
+        return
     folder_path = os.path.abspath(folder_path)
     folder_id = _ensure_node(conn, folder_path)
 
@@ -573,3 +578,11 @@ def sync_folder(conn, folder_path, run_mode='normal'):
         _delete_cascade(conn, db_row['id'])
 
     conn.commit()
+
+    # 递归同步子文件夹
+    if recursive:
+        cursor = conn.execute(
+            "SELECT path FROM nodes WHERE parent_id=? AND type=1", (folder_id,)
+        )
+        for row in cursor.fetchall():
+            sync_folder(conn, row[0], run_mode=run_mode, recursive=True, _depth=_depth + 1)
