@@ -1,16 +1,14 @@
-"""
-核心蓝图模块
+"""核心蓝图模块
 包含首页、目录浏览等核心路由
 """
+import os
 import time
+from datetime import datetime
 from flask import Blueprint, render_template, session, request
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
-from utils.file_utils import get_drives
 from utils.media_utils import (
-    init_traversal, get_next_media_files, init_sequential_traversal,
-    get_next_sequential_files, get_category_children_info,
-    remove_traversal,
+    get_category_children_info,
 )
 from blueprints.auth import login_required, require_mode
 
@@ -48,28 +46,43 @@ def index():
                                    current_path='',
                                    is_homepage=True)
         else:
-            if config.RANDOM_MODE:
-                # 随机模式：初始化遍历状态
-                if 'traversal_id' not in session or config.REGENERATE_RANDOM_ON_REFRESH:
-                    old_id = session.get('traversal_id')
-                    if old_id:
-                        remove_traversal(old_id)
-                    session['traversal_id'] = init_traversal(str(config.MEDIA_DIR), config.RUN_MODE)
-                    session.permanent = True
-                    logger.info("随机模式：初始化遍历状态")
+            # 媒体模式：DB 优先读取首页数据
+            first_page = []
+            has_more = False
+            try:
+                db_path = config.DB_PATH
+                if db_path:
+                    from utils.db_utils import get_db, ensure_tables, sync_folder, \
+                        get_random_media, get_media_page_all
+                    conn = get_db(db_path)
+                    ensure_tables(conn)
+                    if config.MEDIA_DIR:
+                        sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
 
-                first_page, has_more = get_next_media_files(session['traversal_id'], config.PAGE_FIRST)
-                session.modified = True
-            else:
-                # 非随机模式：顺序遍历
-                old_id = session.get('traversal_id')
-                session.pop('traversal_id', None)
-                if old_id:
-                    remove_traversal(old_id)
-                session['traversal_id'] = init_sequential_traversal(str(config.MEDIA_DIR), config.RUN_MODE)
-                session.permanent = True
-                first_page, has_more = get_next_sequential_files(session['traversal_id'], config.PAGE_FIRST)
-                session.modified = True
+                    table = 'videos' if config.RUN_MODE in ('video', 'douyin') else 'images'
+                    if config.RANDOM_MODE:
+                        rows = get_random_media(conn, table, config.PAGE_FIRST)
+                        has_more = len(rows) == config.PAGE_FIRST
+                    else:
+                        rows, total = get_media_page_all(conn, table, config.PAGE_FIRST, 0)
+                        has_more = len(rows) < total
+
+                    media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
+                    for r in rows:
+                        path = r['path'].replace('\\', '/')
+                        rel_path = path.replace(media_dir_str, '', 1) if media_dir_str else path
+                        ext = os.path.splitext(r['name'])[1].lower()
+                        first_page.append({
+                            'name': r['name'],
+                            'relative_path': rel_path,
+                            'mtime': datetime.fromtimestamp(r['modify_time']).strftime('%Y-%m-%d %H:%M:%S'),
+                            'timestamp': r['modify_time'],
+                            'is_video': ext in config.VIDEO_EXT,
+                            'is_image': ext in config.IMAGE_EXT,
+                        })
+                    conn.close()
+            except Exception:
+                logger.debug("首页 DB 读取失败，返回空列表")
 
             template = 'media_index.html'
             return render_template(template,
@@ -104,6 +117,19 @@ def browse(dirpath):
         if os.path.isfile(abs_path):
             from utils.file_utils import safe_send_file
             return safe_send_file(abs_path, as_attachment=True)
+
+        # 实时增量同步：用户点击时仅核对当前文件夹
+        if config.MEDIA_DIR and config.DB_PATH:
+            try:
+                db_path = config.DB_PATH
+                if os.path.exists(os.path.dirname(db_path)):
+                    from media_scanner import sync_folder, get_db
+                    db_conn = get_db(db_path)
+                    sync_folder(db_conn, abs_path)
+                    db_conn.close()
+            except Exception:
+                pass  # 同步失败不影响浏览
+
         parent_path = os.path.dirname(abs_path)
         parent_link = '/' if os.path.ismount(abs_path) else f'/browse/{parent_path.replace(os.sep, "/")}'
         return render_template('browse.html',

@@ -8,7 +8,7 @@ import urllib.parse
 from flask import Blueprint, request, jsonify, send_from_directory, session, render_template
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
-from utils.media_utils import get_next_media_files, get_next_sequential_files, get_files_in_folder
+from utils.media_utils import get_files_in_folder
 from utils.file_utils import get_mime_type
 from blueprints.auth import login_required, require_mode
 
@@ -113,45 +113,9 @@ def load_more():
         if db_ok:
             return jsonify(db_result)
 
-        # 回退到遍历
-        if is_random:
-            if 'traversal_id' not in session:
-                logger.error("load_more 随机模式：遍历状态不存在")
-                return jsonify({'code': 1, 'msg': '遍历状态不存在，请刷新页面'})
-
-            try:
-                more, has_more = get_next_media_files(session['traversal_id'], limit)
-                session.modified = True
-                return jsonify({
-                    'code': 0,
-                    'data': more,
-                    'has_more': has_more,
-                    'next_offset': offset + len(more),
-                    'is_random': True
-                })
-            except Exception as e:
-                import traceback
-                logger.error(f"load_more 随机模式发生错误: {e}\n{traceback.format_exc()}")
-                return jsonify({'code': 1, 'msg': f'服务器内部错误: {str(e)}'}), 500
-        else:
-            if 'traversal_id' not in session:
-                logger.error("load_more 顺序模式：遍历状态不存在")
-                return jsonify({'code': 1, 'msg': '遍历状态不存在，请刷新页面'})
-
-            try:
-                more, has_more = get_next_sequential_files(session['traversal_id'], limit)
-                session.modified = True
-                return jsonify({
-                    'code': 0,
-                    'data': more,
-                    'has_more': has_more,
-                    'next_offset': offset + len(more),
-                    'is_random': False
-                })
-            except Exception as e:
-                import traceback
-                logger.error(f"load_more 顺序模式发生错误: {e}\n{traceback.format_exc()}")
-                return jsonify({'code': 1, 'msg': f'服务器内部错误: {str(e)}'}), 500
+        # DB 不可用，返回空
+        logger.debug("load_more: DB 不可用，无法加载数据")
+        return jsonify({'code': 1, 'msg': '数据库不可用'}), 503
     except Exception as e:
         log_exception(request, 'LOAD_MORE', '', e)
         return jsonify({'code': 1, 'msg': '加载失败'}), 500
