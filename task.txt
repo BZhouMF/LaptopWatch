@@ -1,237 +1,250 @@
-========================================
-LaptopWatch 代码问题清单
-========================================
-
-按重要程度降序排列（1 号最重要）
-
-========================================
-1. 文件 API 无路径限制（安全隐患）
-========================================
-
-问题所在: file_api.py:28, 50, 73（serve_raw / view_file / view_text_file）
-
-当前表现:
-  serve_raw、view_file、view_text_file 使用 os.path.abspath() 解析路径后直接
-  发送文件，没有任何路径白名单限制。
-
-后果:
-  任何获得密码的认证用户，可以通过类似
-  /file/raw/C:/Windows/System32/config/SAM
-  的请求读取系统上的任意文件。
-  相比之下，serve_media 有 startswith(MEDIA_DIR) 检查，但 file API 完全缺失。
-
-修复方式: (commit 9c7de63)
-  新增 _resolve_file_path(raw_path) 共享校验函数:
-  - 用 os.path.realpath() 替代 os.path.abspath()
-    realpath 会解析所有符号链接和 ../ 路径穿越，返回真正的规范路径
-  - 统一做文件存在性检查
-  - 三个接口全部改用此函数
-
-  前后对比:
-    修复前: abs_path = os.path.abspath(decoded) → 直接 safe_send_file
-    修复后: abs_path = os.path.realpath(decoded) → 存在性检查 → safe_send_file
-
-
-========================================
-2. 遍历状态锁边界不一致（线程安全）✅ 已修复
-========================================
-
-问题所在: media_utils.py:350-431（get_next_media_files）
-
-当前表现:
-  get_next_media_files 在 _traversal_lock 范围内获取 traversal 引用后立即
-  释放锁，之后在无锁状态下修改 traversal 对象（如修改 current_file_idx、
-  current_folder 等字段）。仅在最终的 _traversal_store.pop() 时才重新加锁。
+# LaptopWatch 数据库缓存层 — 方案与任务
+
+## 设计原则
+
+1. **不依赖 media_scanner.py**，该文件仅作测试用途
+2. **惰性填充**：用户浏览到哪就缓存到哪，不预先全量扫描
+3. **普通模式保持 emoji**：nodes 只存路径元信息，不存封面
+4. **封面只在媒体模式生效**：images/videos 表有 cover BLOB，normal 模式不走
+5. **每步有测试**：test/ 目录下对应测试文件
+
+## 数据库设计
+
+**数据库文件**：`db_path/{scope_name}.db`
+（scope_name = MEDIA_DIR 的 basename，如 "Huawei Share"）
+
+**三张固定表名**：
+
+```sql
+CREATE TABLE nodes (
+    id          INTEGER PRIMARY KEY,
+    parent_id   INTEGER NOT NULL DEFAULT 0,
+    name        TEXT NOT NULL,
+    type        INTEGER NOT NULL,         -- 1=folder, 2=file
+    path        TEXT NOT NULL UNIQUE,
+    size        INTEGER NOT NULL DEFAULT 0,
+    extension   TEXT,
+    create_time REAL NOT NULL,
+    modify_time REAL NOT NULL,
+    is_hidden   INTEGER NOT NULL DEFAULT 0
+);
 
-后果:
-  两个并发请求可能同时获取并修改同一个 traversal_id 的状态，导致:
-  - 同一个视频文件被返回多次
-  - 文件遍历顺序错乱
-  - 极端情况下 finished 标记丢失，遍历永不结束
-
-修复方式: (commit c6c8475)
-  将 get_next_media_files 和 get_next_sequential_files 的整个函数体
-  包裹在 with _traversal_lock 内，确保从获取 traversal 引用到最终写回
-  状态的全过程原子化。
+CREATE TABLE images (
+    id          INTEGER PRIMARY KEY,
+    parent_id   INTEGER NOT NULL DEFAULT 0,
+    name        TEXT NOT NULL,
+    path        TEXT NOT NULL UNIQUE,
+    modify_time REAL NOT NULL,
+    cover       BLOB DEFAULT NULL
+);
 
-  前后对比:
-    修复前:
-      with lock: traversal = store.get(id)
-      # 锁已释放，但之后一直读写 traversal
-      traversal['current_file_idx'] = idx
-      with lock: store.pop(id)
+CREATE TABLE videos (
+    id          INTEGER PRIMARY KEY,
+    parent_id   INTEGER NOT NULL DEFAULT 0,
+    name        TEXT NOT NULL,
+    path        TEXT NOT NULL UNIQUE,
+    modify_time REAL NOT NULL,
+    cover       BLOB DEFAULT NULL
+);
+```
 
-    修复后:
-      with lock:
-          traversal = store.get(id)
-          # 全部操作在锁内
-          traversal['current_file_idx'] = idx
-          store.pop(id)  # 如需清理
+## 各模式数据流
 
-  影响: 锁持有期间可能包含磁盘 I/O（get_files_in_folder），但由于文件缓存
-  机制（60s TTL），绝大多数调用是内存操作，对性能影响极小。
+### 普通模式 (normal)
+browse 页面 → sync_folder(conn, path, 'normal') → 只更新 nodes → 前端根据 extension 显示 emoji
+不走 images/videos，不走封面。
 
+### 视频模式 (video)
+页面加载 → sync_folder(conn, path, 'video') → 更新 nodes + videos → SQL 分页取视频列表 → cover 从 videos.cover 直接发 BLOB
 
-========================================
-3. _refill_buffer 递归无深度限制（栈溢出风险）✅ 已修复
-========================================
+### 图片模式 (image)
+同上，images 代替 videos。
 
-问题所在: douyin_api.py:136-147（_refill_buffer）
+### 抖音模式 (douyin)
+SQL RANDOM() 取视频，不再需要内存 dict。
 
-当前表现:
-  _refill_buffer 在 traversal 返回的文件中没有视频文件时，递归调用自身:
-    if not videos and has_more:
-        _refill_buffer(state)  # 递归, 无深度限制
+### 目录浏览模式 (category)
+SQL 查询替代递归 scandir，每分类块取 CATEGORY_PAGE_SIZE 条。
 
-后果:
-  如果遍历到大量只包含非视频文件（字幕/图片/文本）的文件夹，
-  递归深度可能达到几百上千层，触发 RecursionError，
-  导致 douyin/next 接口返回 500 错误。
+## 任务清单
 
-修复方式: (commit fa8a279)
-  将递归改为 while True 循环:
-    while True:
-        files, has_more = get_next_media_files(tid, config.PAGE_LOAD)
-        videos = [f for f in files if f.get('is_video')]
-        if not videos and has_more:
-            continue  # 原为 _refill_buffer(state); return
-        state['buffer'] = videos
-        state['has_more'] = has_more
-        break
+---
 
-  前后对比:
-    修复前: 递归调用，无深度限制
-    修复后: while 循环，无栈深度问题
+### 阶段 1：db_utils.py 基础框架
 
+#### [x] 任务 1.1：创建 utils/db_utils.py — 数据库连接与表创建
 
-========================================
-4. print() 和 logger 混用（日志体系分裂）✅ 已修复
-========================================
+**目标**：提供数据库初始化基础设施
 
-问题所在: 多处 — media_utils.py、thumbnail_utils.py、normal_api.py、app.py 等
+**内容**：
+- `get_db(db_path)` — 创建连接，设置 WAL 模式
+- `ensure_tables(conn)` — CREATE TABLE IF NOT EXISTS nodes/images/videos
 
-当前表现:
-  项目中 print()、_safe_print()、logger.info()/error() 三种方式混用:
-  - media_utils.py: 用 print() + logger.info() + logger.warning()
-  - thumbnail_utils.py: 用 print() 输出错误 + logger.error() 输出同样内容
-  - normal_api.py: 在 except 块中直接 print() 而不使用 logger
+**测试**：`test/test_db_utils.py`
+  - ensure_tables 创建三张表
+  - 重复调用幂等
+  - get_db 返回有效连接
 
-后果:
-  - 使用 print() 的消息在 GUI 模式下不会写入文件日志，排查问题时不完整
-  - print() 没有日志级别，无法按等级过滤
+---
 
-修复方式: (commit c0f09af)
-  - media_utils.py: print() → logger.info()（伴随的 logger.info 保留）
-  - thumbnail_utils.py: 删除全部 print()（均有同内容 logger.error 在前）
-  - file_utils.py: 删除全部 print()（均有同内容 logger.error 在前）
-  - normal_api.py: print() → logger.warning()/error()，新增 logger 导入
-  - file_api.py: print() → logger.debug()，新增 logger 导入
+#### [x] 任务 1.2：sync_folder — 单文件夹增量同步
 
-  共修改 5 个文件，删 24 行，增 10 行。
+**目标**：用户点一个文件夹，只 scandir 该层，差异写入 DB
 
+**内容**：
+- `sync_folder(conn, folder_path, run_mode)`
+  - 确保文件夹自身在 nodes 中存在
+  - scandir(folder_path) 只 1 层，不递归
+  - 比对 DB 子项：新增 INSERT、删除 DELETE、修改 UPDATE
+  - 按 run_mode 决定是否同步 images/videos：
+    - normal：只写 nodes
+    - video：nodes + videos（文件夹也写进 videos，cover=NULL）
+    - image：nodes + images
+    - douyin：同 video
+  - 封面生成数量不硬编码，但首次遇到就生成存 DB
 
-========================================
-5. find_parent_pid 每次启动 PowerShell（性能问题）✅ 已修复
-========================================
+**注意**：不调用 media_scanner.py，所有逻辑独立实现
 
-问题所在: process_utils.py:170-185（find_parent_pid）
+**测试**：`test/test_sync_folder.py`
+  - 空文件夹首次同步
+  - 添加文件后再次同步（新增）
+  - 删除文件后同步（删除）
+  - 修改 modify_time 后同步（更新）
+  - 子文件夹不递归
+  - run_mode=video 时 videos 表同步
+  - run_mode=normal 时不碰 images/videos
+  - 删除文件夹时级联删除子节点
 
-当前表现:
-  find_parent_pid 对每个 PID 调用一次 PowerShell 命令（~500ms）。
+---
 
-后果:
-  端口释放操作延迟增加，频繁启动进程浪费资源。
+### 阶段 2：查询接口
 
-修复方式: (commit 3b55667)
-  将 PowerShell 命令替换为 wmic:
-    修复前: powershell -NoProfile -Command "Get-CimInstance..."
-    修复后: wmic process where "ProcessId=X" get ParentProcessId /value
-  wmic 启动时间约 50ms，性能提升约 10 倍。
+#### [ ] 任务 2.1：文件夹/文件列表查询
 
+**目标**：提供路由所需的分页、排序查询
 
-========================================
-6. 蓝图中 __all__ 与实际导出不匹配（代码困惑）✅ 已修复
-========================================
+**内容**：
+- `get_children(conn, parent_id, sort_type, sort_order)` — 返回某文件夹下所有子项（文件夹 + 文件），支持 name/time 排序，asc/desc
+- `get_media_page(conn, table, parent_id, limit, offset)` — 分页取媒体文件，table = 'images' 或 'videos'
+- `get_random_media(conn, table, limit, exclude_paths=None)` — 随机取 N 个媒体文件
 
-问题所在: blueprints/__init__.py:8
+**测试**：`test/test_queries.py`
+  - get_children 返回正确子项
+  - 排序 name asc/desc 正确
+  - 排序 time asc/desc 正确
+  - 分页 limit/offset 正确
+  - get_random_media 返回不同结果
 
-当前表现:
-  __all__ 中缺少 category_bp 导出。
+---
 
-修复方式: (commit a1135b0)
-  - 新增 category_api 的导入
-  - __all__ 补充 "category_bp"
+#### [ ] 任务 2.2：封面读写接口
 
+**目标**：封装 cover 的读写，供缩略图路由调用
 
-========================================
-7. thumbnail_utils 模块级代码被重复执行 ✅ 已修复
-========================================
+**内容**：
+- `get_cover(conn, table, path)` — 查某个文件的 cover BLOB
+- `set_cover(conn, table, path, cover_data)` — 写入 cover
+- `generate_and_cache_cover(conn, table, filepath)` — 生成缩略图 + 写入 DB + 返回
 
-问题所在: thumbnail_utils.py:128 + app.py:89
+**测试**：`test/test_cover.py`
+  - get_cover 返回 None 当没有 cover
+  - set_cover 后 get_cover 返回正确数据
+  - generate_and_cache_cover 对图片/视频均有效
+  - 重复调用不重复生成
 
-当前表现:
-  模块加载时执行一次 log_thumbnail_backend_status()，app.py 又显式调用一次。
+---
 
-后果:
-  启动日志中 OpenCV 状态打印两遍。
+### 阶段 3：路由改造
 
-修复方式: (commit 6e51064)
-  删除 thumbnail_utils.py 末尾的模块级 log_thumbnail_backend_status() 调用，
-  仅保留 app.py 中的显式调用。
+#### [ ] 任务 3.1：normal_api.py — /api/list 走 DB
 
+**目标**：normal 模式下列表从 DB 读取
 
-========================================
-8. gui.py 使用非标准方式检查 ttk 按钮状态 ✅ 已修复
-========================================
+**内容**：
+- 在 `/api/list` 路由中，如果 DB 存在且有数据，从 nodes 表查询返回
+- 如果 DB 不存在或无数据，调用 sync_folder 填充后再查
+- 如果 DB 不可用，回退到现有的 get_sorted_folders() + get_files_in_folder()
+- 返回数据结构不变，兼容前端
 
-问题所在: gui.py:975
+**测试**：`test/test_normal_api.py`
+  - Flask test client 请求 /api/list
+  - 返回结构不变
+  - 首次访问自动 sync
+  - 再次访问走缓存
 
-修复方式: (commit 974eb1d)
-  str(self.stop_btn['state']) == 'normal' → self.stop_btn.instate(['normal'])
+---
 
+#### [ ] 任务 3.2：media_api.py — /media/load_more + thumbnail 走 DB
 
-========================================
-9. 重复调用 request.get_json() 两次 ✅ 已修复
-========================================
+**目标**：媒体模式分页和缩略图从 DB 读取
 
-问题所在: qid.py:527-540（api_logs_ingest）
+**内容**：
+- load_more：根据随机/顺序模式，从 DB 取下一页
+- thumbnail：先查 DB cover，有就直接返回，没有再生成并写入
+- 删除对 _traversal_store 的依赖
 
-修复方式: (commit 974eb1d)
-  request.get_json() 提取到函数开头调用一次，去除 else 分支中的重复调用。
+**测试**：`test/test_media_api.py`
+  - load_more 返回分页结果
+  - thumbnail 返回有效图片
+  - thumbnail 第二次命中缓存
+  - 随机/顺序模式皆正确
 
+---
 
-========================================
-10. _reset_after_stop 与 _append_log 跨线程操作 session_logs ✅ 已修复
-========================================
+#### [ ] 任务 3.3：douyin_api.py — init/next 走 DB
 
-问题所在: gui.py:1039-1056, 1058-1069
+**目标**：抖音模式从 DB 取视频，删除内存 dict
 
-修复方式: (commit 974eb1d)
-  新增 threading.Lock（_session_logs_lock）保护 session_logs 的跨线程访问。
-  _append_log 和 _reset_after_stop 中对 session_logs 的操作均在锁内进行。
+**内容**：
+- init：从 videos 表随机取一条
+- next：从 videos 表随机取一条，排除 history
+- 不再维护 _douyin_store
 
+**测试**：`test/test_douyin_api.py`
+  - init 返回一个有效视频
+  - next 返回不同视频
+  - 历史去重工作
+  - 无视频时返回空
 
-========================================
-11. tempfile 清理路径覆盖不完整（临时文件残留） ✅ 已修复
-========================================
+---
 
-问题所在: file_api.py:149-170, 236-255（download_folder / download_selected）
+#### [ ] 任务 3.4：category_api.py — 走 DB
 
-修复方式: (commit 974eb1d)
-  在 send_file 外层添加 try/except，当 send_file 抛出异常时立即清理临时
-  ZIP 文件，防止客户端断连导致临时文件残留。
+**目标**：目录浏览模式从 DB 读取，不再递归 scandir
 
+**内容**：
+- category/data：查询各子文件夹及其文件数量
+- category/grid_more：分页查 media 文件
 
-========================================
-12. _on_mode_change 切换模式时排序状态残留 ✅ 已修复
-========================================
+**测试**：`test/test_category_api.py`
+  - 分类数据返回正确
+  - 网格分页正确
 
-问题所在: gui.py:596-621
+---
 
-修复方式: (commit 974eb1d)
-  在切换非媒体模式时新增排序状态重置:
-    self.sort_type_var.set('name')
-    self.sort_order_var.set('asc')
-    self.sort_type_combo.current(0)
-    self.sort_order_combo.current(0)
-  消除排序下拉框显示与内部变量值的不一致。
+### 阶段 4：清理
+
+#### [ ] 任务 4.1：清理废弃代码
+
+**目标**：删除不再使用的遍历状态管理
+
+**内容**：
+- media_utils.py：删除 _traversal_store、_traversal_lock、init_traversal、get_next_media_files、remove_traversal、init_sequential_traversal、get_next_sequential_files
+- douyin_api.py：删除 _douyin_store
+- core.py 首页路由中遍历初始化的相关代码
+
+**测试**：所有路由、所有模式功能正常
+
+---
+
+### 阶段 5：GUI 集成
+
+#### [ ] 任务 5.1：GUI 添加数据库配置选项
+
+**目标**：GUI 中增加数据库相关功能入口
+
+**内容**：
+- 添加「启用数据库缓存」复选框，设置环境变量
+- 添加「打开数据库目录」按钮，方便查看 db 文件
+
+**测试**：手动确认 GUI 选项生效
