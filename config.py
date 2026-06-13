@@ -113,8 +113,15 @@ class Config:
         return '/static'
 
     @property
+    def DB_CACHE_ENABLED(self):
+        """是否启用数据库缓存"""
+        return os.getenv('LAPTOPWATCH_DB_CACHE', 'true').lower() == 'true'
+
+    @property
     def DB_PATH(self):
-        """数据库路径，与 media_scanner.py 保持一致"""
+        """数据库路径，缓存关闭时返回 None"""
+        if not self.DB_CACHE_ENABLED:
+            return None
         scan_dir = str(self.MEDIA_DIR) if self.MEDIA_DIR else ''
         if scan_dir:
             basename = os.path.basename(scan_dir)
