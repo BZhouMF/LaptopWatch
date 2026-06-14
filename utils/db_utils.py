@@ -453,29 +453,6 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
     return [dict(r) for r in rows]
 
 
-def _collect_subfolder_tree(conn, parent_id, media_type):
-    """递归收集所有后代子文件夹及媒体计数（单次 CTE 查询）
-
-    返回 [{id, path, media_count}, ...]，仅包含有媒体文件的文件夹。
-    """
-    rows = conn.execute("""
-        WITH RECURSIVE subdirs AS (
-            SELECT id, path, name, parent_id FROM nodes
-            WHERE parent_id = ? AND type = 1
-            UNION ALL
-            SELECT n.id, n.path, n.name, n.parent_id
-            FROM nodes n JOIN subdirs s ON n.parent_id = s.id
-            WHERE n.type = 1
-        )
-        SELECT s.id, s.path, COUNT(m.id) AS media_count
-        FROM subdirs s
-        LEFT JOIN media m ON m.parent_id = s.id AND m.media_type = ?
-        GROUP BY s.id
-        HAVING media_count > 0
-        ORDER BY s.path
-    """, (parent_id, media_type)).fetchall()
-    return [{'id': r['id'], 'path': r['path'], 'media_count': r['media_count']}
-            for r in rows]
 
 
 def get_direct_media(conn, parent_id, media_type, sort_type='name',
@@ -538,59 +515,60 @@ def _format_media_row(row):
 def traverse_media(conn, root_path, media_type, offset=0, limit=36,
                    sort_type='name', sort_order='asc',
                    random_start=False, exclude_paths=None):
-    """文件夹遍历器：DB 驱动，按需核实，深度遍历所有后代子文件夹
+    """文件夹遍历器：用到才核实，动态队列，逐文件夹收集
 
-    - 首次访问：递归 sync_folder 一次填充整棵树，之后纯 DB 读
-    - 后续访问：仅 sync_folder 根目录感知顶层变更
+    - 只 sync_folder(root) 一层以发现直接子文件夹
+    - 遍历队列动态推进，处理到哪个文件夹才 sync 哪个
+    - 处理中发现的子文件夹追加到队尾，深层嵌套自然处理
     - 返回 (items, next_offset, has_more)
     """
     init_tables(conn)
     root_path = os.path.abspath(root_path)
     root_id = _ensure_node(conn, root_path)
 
-    # 首次访问做一次性递归同步，后续仅同步根目录
-    has_children = conn.execute(
-        "SELECT 1 FROM nodes WHERE parent_id=? LIMIT 1", (root_id,)
-    ).fetchone()
-    if has_children:
-        sync_folder(conn, root_path)
-    else:
-        sync_folder(conn, root_path, recursive=True)
+    # 同步根目录（1 层）以发现直接子文件夹
+    sync_folder(conn, root_path)
 
-    # 获取根目录直接媒体文件数
-    root_count = conn.execute(
-        "SELECT COUNT(*) FROM media WHERE parent_id=? AND media_type=?",
-        (root_id, media_type),
-    ).fetchone()[0]
-
-    # 一次 CTE 查询获取所有有媒体文件的后代文件夹及计数
-    all_folders = _collect_subfolder_tree(conn, root_id, media_type)
-
-    # 随机模式：轮转子文件夹列表
-    if random_start and all_folders:
+    # 从 DB 取根目录的直接子文件夹，构建初始队列
+    subdirs = get_subfolder_nodes(conn, root_id, sort_type, sort_order)
+    if random_start and subdirs:
         import random as _random
-        start_idx = _random.randint(0, len(all_folders) - 1)
-        all_folders = all_folders[start_idx:] + all_folders[:start_idx]
+        start_idx = _random.randint(0, len(subdirs) - 1)
+        subdirs = subdirs[start_idx:] + subdirs[:start_idx]
 
-    # 构建遍历序列（仅包含有媒体文件的文件夹）
-    segments = [{'id': root_id, 'path': root_path, 'media_count': root_count}]
-    segments.extend(all_folders)
+    # 动态遍历队列
+    queue = [(root_id, root_path)]
+    queue.extend((f['id'], f['path']) for f in subdirs)
 
     logger.debug(
-        "traverse_media: root=%s type=%s offset=%d limit=%d folders=%d exclude=%d",
-        root_path, media_type, offset, limit, len(all_folders),
+        "traverse_media: root=%s type=%s offset=%d limit=%d init_folders=%d exclude=%d",
+        root_path, media_type, offset, limit, len(subdirs),
         len(exclude_paths) if exclude_paths else 0,
     )
 
-    # 遍历收集
     collected = []
     skipped = 0
     has_more = False
     exclude_set = set(exclude_paths) if exclude_paths else set()
-    seg_files_total = 0
-    for idx, segment in enumerate(segments):
-        seg_total = segment['media_count']
-        seg_files_total += seg_total
+
+    queue_idx = 0
+    while queue_idx < len(queue) and len(collected) < limit:
+        seg_id, seg_path = queue[queue_idx]
+        queue_idx += 1
+
+        # 用到才核实：根目录已在上方同步，子文件夹遍历到才 sync
+        if queue_idx > 1:
+            sync_folder(conn, seg_path)
+            # 发现新的子文件夹，追加到队尾
+            new_subs = get_subfolder_nodes(conn, seg_id, sort_type, sort_order)
+            for ns in new_subs:
+                queue.append((ns['id'], ns['path']))
+
+        # 获取当前文件夹的直接媒体文件数
+        seg_total = conn.execute(
+            "SELECT COUNT(*) FROM media WHERE parent_id=? AND media_type=?",
+            (seg_id, media_type),
+        ).fetchone()[0]
         if seg_total == 0:
             continue
 
@@ -601,41 +579,29 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
         # offset 落在当前段内 — 取文件
         seg_offset = max(0, offset - skipped)
 
-        while len(collected) < limit:
-            remaining = limit - len(collected)
-            rows, _ = get_direct_media(
-                conn, segment['id'], media_type, sort_type, sort_order,
-                limit=remaining, offset=seg_offset,
-            )
-            if not rows:
-                break
-
+        rows, _ = get_direct_media(
+            conn, seg_id, media_type, sort_type, sort_order,
+            limit=limit - len(collected), offset=seg_offset,
+        )
+        if rows:
             fetched_count = len(rows)
             if exclude_set:
                 rows = [r for r in rows if r['path'] not in exclude_set]
-
             for r in rows:
                 if len(collected) >= limit:
                     break
                 collected.append(_format_media_row(r))
-
             seg_offset += fetched_count
-            if fetched_count < remaining:
-                break
 
         skipped += seg_total
         if len(collected) >= limit:
-            # 当前段还有剩余 或 后续段有文件 → has_more
-            if seg_offset < seg_total:
-                has_more = True
-            elif idx + 1 < len(segments):
-                has_more = True
+            has_more = (seg_offset < seg_total or queue_idx < len(queue))
             break
 
     next_offset = offset + len(collected)
     logger.debug(
-        "traverse_media: 返回 %d 条 has_more=%s total_files=%d",
-        len(collected), has_more, seg_files_total,
+        "traverse_media: 返回 %d 条 has_more=%s next_offset=%d scanned=%d",
+        len(collected), has_more, next_offset, queue_idx,
     )
     return collected, next_offset, has_more
 
