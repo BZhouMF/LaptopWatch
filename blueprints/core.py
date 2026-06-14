@@ -27,13 +27,10 @@ def index():
         elif config.RUN_MODE == 'douyin':
             # 同步 DB 确保所有表已更新
             try:
-                db_path = config.DB_PATH
-                if db_path and config.MEDIA_DIR:
-                    from utils.db_utils import get_db, ensure_tables, sync_folder, drive_prefix
-                    conn = get_db(db_path)
-                    prefix = drive_prefix(str(config.MEDIA_DIR))
-                    ensure_tables(conn, prefix=prefix)
-                    sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+                if config.DB_PATH and config.MEDIA_DIR:
+                    from utils.db_utils import get_db, sync_folder
+                    conn = get_db()
+                    sync_folder(conn, str(config.MEDIA_DIR))
                     conn.close()
             except Exception:
                 logger.debug("抖音模式首页 DB 同步失败")
@@ -42,15 +39,12 @@ def index():
                                    auto_play=config.DOUYIN_AUTO_PLAY,
                                    muted=config.DOUYIN_MUTED)
         elif config.CATEGORY_BROWSE:
-            # 先同步所有文件到 DB（全表归类）
+            # 先同步所有文件到 DB
             try:
-                db_path = config.DB_PATH
-                if db_path and config.MEDIA_DIR:
-                    from utils.db_utils import get_db, ensure_tables, sync_folder, drive_prefix
-                    conn = get_db(db_path)
-                    prefix = drive_prefix(str(config.MEDIA_DIR))
-                    ensure_tables(conn, prefix=prefix)
-                    sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+                if config.DB_PATH and config.MEDIA_DIR:
+                    from utils.db_utils import get_db, sync_folder
+                    conn = get_db()
+                    sync_folder(conn, str(config.MEDIA_DIR))
                     conn.close()
             except Exception:
                 logger.debug("目录浏览模式 DB 同步失败，回退到文件系统")
@@ -73,58 +67,29 @@ def index():
                                    current_path='',
                                    is_homepage=True)
         else:
-            # 媒体模式：DB 优先读取首页数据
+            # 媒体模式：文件夹遍历器，按需核实
             first_page = []
             has_more = False
             total_count = 0
             try:
-                db_path = config.DB_PATH
-                if db_path:
-                    from utils.db_utils import get_db, ensure_tables, sync_folder, \
-                        get_random_media, get_media_page_all, drive_prefix, _file_table_from_media_table
-                    conn = get_db(db_path)
-                    prefix = drive_prefix(str(config.MEDIA_DIR))
-                    ensure_tables(conn, prefix=prefix)
-                    if config.MEDIA_DIR:
-                        sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+                if config.DB_PATH and config.MEDIA_DIR:
+                    from utils.db_utils import get_db, traverse_media
+                    conn = get_db()
+                    media_type = 'video' if config.RUN_MODE == 'video' else 'image'
 
-                    table = f'{prefix}_v' if config.RUN_MODE in ('video', 'douyin') else f'{prefix}_p'
-                    file_table = _file_table_from_media_table(table)
-
-                    # 查询总文件数（过滤媒体目录前缀）
-                    media_prefix = os.path.abspath(str(config.MEDIA_DIR)) + os.sep
-                    cursor = conn.execute(
-                        f"SELECT COUNT(*) FROM {table} m JOIN {file_table} n ON n.path = m.path "
-                        f"WHERE n.type=2 AND m.path LIKE ?", (media_prefix + '%',)
+                    first_page, _, has_more = traverse_media(
+                        conn, str(config.MEDIA_DIR), media_type,
+                        offset=0, limit=config.PAGE_FIRST,
+                        sort_type=config.SORT_TYPE,
+                        sort_order=config.SORT_ORDER,
+                        random_start=config.RANDOM_MODE,
                     )
-                    total_count = cursor.fetchone()[0]
-
-                    if config.RANDOM_MODE:
-                        rows = get_random_media(conn, table, config.PAGE_FIRST, media_dir=config.MEDIA_DIR)
-                        has_more = len(rows) == config.PAGE_FIRST
-                    else:
-                        rows, _ = get_media_page_all(conn, table, config.PAGE_FIRST, 0, media_dir=config.MEDIA_DIR)
-                        has_more = len(rows) < total_count
-
-                    media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
-                    for r in rows:
-                        path = r['path'].replace('\\', '/')
-                        rel_path = path.replace(media_dir_str, '', 1) if media_dir_str else path
-                        ext = os.path.splitext(r['name'])[1].lower()
-                        first_page.append({
-                            'name': r['name'],
-                            'relative_path': rel_path,
-                            'mtime': datetime.fromtimestamp(r['modify_time']).strftime('%Y-%m-%d %H:%M:%S'),
-                            'timestamp': r['modify_time'],
-                            'is_video': ext in config.VIDEO_EXT,
-                            'is_image': ext in config.IMAGE_EXT,
-                        })
                     conn.close()
             except Exception:
                 logger.debug("首页 DB 读取失败，返回空列表")
 
             template = 'media_index.html'
-            total_pages = max(1, (total_count + config.PAGE_LOAD - 1) // config.PAGE_LOAD)
+            total_pages = 1
             return render_template(template,
                                    media_list=first_page,
                                    page_first=config.PAGE_FIRST,
