@@ -453,6 +453,16 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
     return [dict(r) for r in rows]
 
 
+def _collect_subfolder_tree(conn, parent_id, sort_type='name', sort_order='asc'):
+    """递归收集所有后代子文件夹，返回 [{id, path}, ...]（DFS 前序，纯 DB 读）"""
+    result = []
+    subs = get_subfolder_nodes(conn, parent_id, sort_type, sort_order)
+    for sub in subs:
+        result.append({'id': sub['id'], 'path': sub['path']})
+        result.extend(_collect_subfolder_tree(conn, sub['id'], sort_type, sort_order))
+    return result
+
+
 def get_direct_media(conn, parent_id, media_type, sort_type='name',
                      sort_order='asc', limit=None, offset=0):
     """查询某个文件夹的直接子媒体文件（不递归子文件夹）
@@ -513,34 +523,41 @@ def _format_media_row(row):
 def traverse_media(conn, root_path, media_type, offset=0, limit=36,
                    sort_type='name', sort_order='asc',
                    random_start=False, exclude_paths=None):
-    """文件夹遍历器：用到才核实，DB 驱动，逐文件夹收集
+    """文件夹遍历器：DB 驱动，按需核实，深度遍历所有后代子文件夹
 
-    只遍历根目录的直接子文件夹，遍历到哪个文件夹才 sync_folder 哪个。
-    返回 (items, next_offset, has_more)
+    - 首次访问：递归 sync_folder 一次填充整棵树，之后纯 DB 读
+    - 后续访问：仅 sync_folder 根目录感知顶层变更
+    - 返回 (items, next_offset, has_more)
     """
     init_tables(conn)
     root_path = os.path.abspath(root_path)
     root_id = _ensure_node(conn, root_path)
 
-    # 同步根目录（1 层）以发现直接子文件夹
-    sync_folder(conn, root_path)
+    # 首次访问做一次性递归同步，后续仅同步根目录
+    has_children = conn.execute(
+        "SELECT 1 FROM nodes WHERE parent_id=? LIMIT 1", (root_id,)
+    ).fetchone()
+    if has_children:
+        sync_folder(conn, root_path)
+    else:
+        sync_folder(conn, root_path, recursive=True)
 
-    # 从 DB 取根目录的直接子文件夹
-    folders = get_subfolder_nodes(conn, root_id, sort_type, sort_order)
+    # 纯 DB 读取完整目录树（不做文件系统扫描）
+    all_folders = _collect_subfolder_tree(conn, root_id, sort_type, sort_order)
 
     # 随机模式：轮转子文件夹列表
-    if random_start and folders:
+    if random_start and all_folders:
         import random as _random
-        start_idx = _random.randint(0, len(folders) - 1)
-        folders = folders[start_idx:] + folders[:start_idx]
+        start_idx = _random.randint(0, len(all_folders) - 1)
+        all_folders = all_folders[start_idx:] + all_folders[:start_idx]
 
-    # 构建遍历序列：根目录直接文件 + 直接子文件夹
+    # 构建遍历序列：根目录直接文件 + 所有后代子文件夹
     segments = [{'id': root_id, 'path': root_path}]
-    segments.extend({'id': f['id'], 'path': f['path']} for f in folders)
+    segments.extend(all_folders)
 
     logger.debug(
         "traverse_media: root=%s type=%s offset=%d limit=%d folders=%d exclude=%d",
-        root_path, media_type, offset, limit, len(folders),
+        root_path, media_type, offset, limit, len(all_folders),
         len(exclude_paths) if exclude_paths else 0,
     )
 
@@ -551,10 +568,7 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     exclude_set = set(exclude_paths) if exclude_paths else set()
     seg_files_total = 0
     for idx, segment in enumerate(segments):
-        # 用到才核实：根目录已在上方同步，子文件夹遍历到才 scandir
-        if idx > 0:
-            sync_folder(conn, segment['path'])
-
+        # 文件夹已在首次递归同步中核实，此处纯 DB 读取
         _, seg_total = get_direct_media(conn, segment['id'], media_type,
                                         sort_type, sort_order)
         seg_files_total += seg_total
@@ -598,9 +612,8 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
             if seg_offset < current_total:
                 has_more = True
             else:
-                # 检查后续段是否还有文件（需先同步）
+                # 检查后续段是否还有文件
                 for seg in segments[idx + 1:]:
-                    sync_folder(conn, seg['path'])
                     _, rt = get_direct_media(conn, seg['id'], media_type,
                                              sort_type, sort_order)
                     if rt > 0:

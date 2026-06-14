@@ -391,8 +391,8 @@ class TestTraverseMedia:
         assert len(items) == 1  # 只有 root_photo.jpg
         assert items[0]['name'] == 'root_photo.jpg'
 
-    def test_nested_subfolders_not_traversed(self, conn):
-        """深层嵌套子文件夹不遍历，仅收集根 + 直接子文件夹"""
+    def test_nested_subfolders(self, conn):
+        """三层嵌套子文件夹能全部遍历"""
         with tempfile.TemporaryDirectory() as td:
             old_media = config.MEDIA_DIR
             config.MEDIA_DIR = Path(td)
@@ -400,12 +400,12 @@ class TestTraverseMedia:
                 _make_file(os.path.join(td, 'root.mp4'))
                 _make_file(os.path.join(td, 'L1', 'l1.mp4'))
                 _make_file(os.path.join(td, 'L1', 'L2', 'l2.mp4'))
+                _make_file(os.path.join(td, 'L1', 'L2', 'L3', 'l3.mp4'))
 
                 items, _, has_more = traverse_media(
                     conn, td, 'video', limit=10)
                 names = {it['name'] for it in items}
-                assert names == {'root.mp4', 'l1.mp4'}
-                assert 'l2.mp4' not in names
+                assert names == {'root.mp4', 'l1.mp4', 'l2.mp4', 'l3.mp4'}
                 assert not has_more
             finally:
                 config.MEDIA_DIR = old_media
