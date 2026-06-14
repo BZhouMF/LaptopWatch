@@ -1,252 +1,154 @@
-# LaptopWatch 数据库缓存层 — 方案与任务
+# 数据库遍历逻辑重构 — 实现方案
 
-## 设计原则
+## 目标
 
-1. **不依赖 media_scanner.py**，该文件仅作测试用途
-2. **惰性填充**：用户浏览到哪就缓存到哪，不预先全量扫描
-3. **普通模式保持 emoji**：nodes 只存路径元信息，不存封面
-4. **封面只在媒体模式生效**：images/videos 表有 cover BLOB，normal 模式不走
-5. **每步有测试**：test/ 目录下对应测试文件
+所有模式统一为「用到才核实、DB 驱动遍历」模型，删除启动时全量扫描，改为文件夹按需遍历。
 
-## 数据库设计
+## 涉及模式
 
-**数据库文件**：`db_path/{scope_name}.db`
-（scope_name = MEDIA_DIR 的 basename，如 "Huawei Share"）
+| 模式 | 改动范围 |
+|------|---------|
+| Normal | 不改 |
+| Video | 大改 — 删除 sync_database，新增 traverse_media |
+| Image | 同 Video |
+| Douyin | 中改 — 同上框架，每次 1 条 + 排除已播放 + 两种子模式 |
+| Category | 中改 — 预览递归取，网格页复用 traverse_media，删缓存层 |
 
-**三张固定表名**：
+---
 
-```sql
-CREATE TABLE nodes (
-    id          INTEGER PRIMARY KEY,
-    parent_id   INTEGER NOT NULL DEFAULT 0,
-    name        TEXT NOT NULL,
-    type        INTEGER NOT NULL,         -- 1=folder, 2=file
-    path        TEXT NOT NULL UNIQUE,
-    size        INTEGER NOT NULL DEFAULT 0,
-    extension   TEXT,
-    create_time REAL NOT NULL,
-    modify_time REAL NOT NULL,
-    is_hidden   INTEGER NOT NULL DEFAULT 0
-);
+## ✅ 任务 1：新增 `get_direct_media` 查询函数
 
-CREATE TABLE images (
-    id          INTEGER PRIMARY KEY,
-    parent_id   INTEGER NOT NULL DEFAULT 0,
-    name        TEXT NOT NULL,
-    path        TEXT NOT NULL UNIQUE,
-    modify_time REAL NOT NULL,
-    cover       BLOB DEFAULT NULL
-);
+**文件**：`utils/db_utils.py`
 
-CREATE TABLE videos (
-    id          INTEGER PRIMARY KEY,
-    parent_id   INTEGER NOT NULL DEFAULT 0,
-    name        TEXT NOT NULL,
-    path        TEXT NOT NULL UNIQUE,
-    modify_time REAL NOT NULL,
-    cover       BLOB DEFAULT NULL
-);
+**目标**：查询某个文件夹的直接子媒体文件（不递归子文件夹）。用 `m.parent_id = ?` 精确匹配，不用 `LIKE` 前缀。
+
+**函数签名**：
+```python
+def get_direct_media(conn, parent_id, media_type, sort_type='name',
+                     sort_order='asc', limit=None, offset=0):
+    """返回 (rows, total_count)"""
 ```
 
-## 各模式数据流
-
-### 普通模式 (normal)
-browse 页面 → sync_folder(conn, path, 'normal') → 只更新 nodes → 前端根据 extension 显示 emoji
-不走 images/videos，不走封面。
-
-### 视频模式 (video)
-页面加载 → sync_folder(conn, path, 'video') → 更新 nodes + videos → SQL 分页取视频列表 → cover 从 videos.cover 直接发 BLOB
-
-### 图片模式 (image)
-同上，images 代替 videos。
-
-### 抖音模式 (douyin)
-SQL RANDOM() 取视频，不再需要内存 dict。
-
-### 目录浏览模式 (category)
-SQL 查询替代递归 scandir，每分类块取 CATEGORY_PAGE_SIZE 条。
-
-## 任务清单
+**验证**：写单元测试，创建文件夹节点 + 媒体记录，确认只返回直接子文件，不返回孙文件。
 
 ---
 
-### 阶段 1：db_utils.py 基础框架
+## ✅ 任务 2：新增 `traverse_media` 遍历函数
 
-#### [x] 任务 1.1：创建 utils/db_utils.py — 数据库连接与表创建
+**文件**：`utils/db_utils.py`
 
-**目标**：提供数据库初始化基础设施
+**目标**：从根文件夹出发，按文件夹排序逐个遍历，sync_folder 核实后从 DB 取直接子媒体文件，凑满 limit 条后停止。
 
-**内容**：
-- `get_db(db_path)` — 创建连接，设置 WAL 模式
-- `ensure_tables(conn)` — CREATE TABLE IF NOT EXISTS nodes/images/videos
+**函数签名**：
+```python
+def traverse_media(conn, root_path, media_type, offset, limit,
+                   sort_type='name', sort_order='asc',
+                   random_start=False, exclude_paths=None):
+    """返回 (items, next_offset, has_more)
 
-**测试**：`test/test_db_utils.py`
-  - ensure_tables 创建三张表
-  - 重复调用幂等
-  - get_db 返回有效连接
+    items: [{name, relative_path, is_video, is_image, ...}]
+    """
+```
 
----
+**内部流程**：
+1. `_ensure_node` 确认根路径的祖先链
+2. `sync_folder(root_path)` 核实根目录
+3. `get_subfolder_nodes` 获取排序后的子文件夹列表
+4. 随机模式：轮转文件夹列表
+5. 构建遍历序列：[根目录直接文件] + [子文件夹1] + [子文件夹2] + ...
+6. 遍历序列，每个段落先 sync_folder 再 get_direct_media
+7. 跳过 offset 个文件，收集 limit 个文件
+8. 格式化返回（相对路径、is_video/is_image 标记）
 
-#### [x] 任务 1.2：sync_folder — 单文件夹增量同步
-
-**目标**：用户点一个文件夹，只 scandir 该层，差异写入 DB
-
-**内容**：
-- `sync_folder(conn, folder_path, run_mode)`
-  - 确保文件夹自身在 nodes 中存在
-  - scandir(folder_path) 只 1 层，不递归
-  - 比对 DB 子项：新增 INSERT、删除 DELETE、修改 UPDATE
-  - 按 run_mode 决定是否同步 images/videos：
-    - normal：只写 nodes
-    - video：nodes + videos（文件夹也写进 videos，cover=NULL）
-    - image：nodes + images
-    - douyin：同 video
-  - 封面生成数量不硬编码，但首次遇到就生成存 DB
-
-**注意**：不调用 media_scanner.py，所有逻辑独立实现
-
-**测试**：`test/test_sync_folder.py`
-  - 空文件夹首次同步
-  - 添加文件后再次同步（新增）
-  - 删除文件后同步（删除）
-  - 修改 modify_time 后同步（更新）
-  - 子文件夹不递归
-  - run_mode=video 时 videos 表同步
-  - run_mode=normal 时不碰 images/videos
-  - 删除文件夹时级联删除子节点
+**验证**：写单元测试，模拟多文件夹场景，验证分页断点、随机起点轮转。
 
 ---
 
-### 阶段 2：查询接口
+## ✅ 任务 3：更新 Video/Image 模式 API
 
-#### [x] 任务 2.1：文件夹/文件列表查询
+**文件**：`blueprints/core.py`（index 路由）、`blueprints/media_api.py`（load_more）
 
-**目标**：提供路由所需的分页、排序查询
+**目标**：Video/Image 首页和加载更多改为调用 `traverse_media`，删除对 `sync_database`、`get_media_page`、`get_random_media` 旧调用方式的依赖。
 
-**内容**：
-- `get_children(conn, parent_id, sort_type, sort_order)` — 返回某文件夹下所有子项（文件夹 + 文件），支持 name/time 排序，asc/desc
-- `get_media_page(conn, table, parent_id, limit, offset)` — 分页取媒体文件，table = 'images' 或 'videos'
-- `get_random_media(conn, table, limit, exclude_paths=None)` — 随机取 N 个媒体文件
+**改动**：
+- `index()` 中 Video/Image 分支：`traverse_media(conn, MEDIA_DIR, media_type, 0, PAGE_FIRST, ...)` 替代原来的 `sync_folder` + `get_media_page`/`get_random_media`
+- `_db_load_more()`：`traverse_media(conn, MEDIA_DIR, media_type, offset, limit, ...)` 替代原逻辑
 
-**测试**：`test/test_queries.py`
-  - get_children 返回正确子项
-  - 排序 name asc/desc 正确
-  - 排序 time asc/desc 正确
-  - 分页 limit/offset 正确
-  - get_random_media 返回不同结果
+**验证**：运行 `test/test_media_api.py` 全部通过。
 
 ---
 
-#### [x] 任务 2.2：封面读写接口
+## ✅ 任务 4：更新 Douyin 模式 API
 
-**目标**：封装 cover 的读写，供缩略图路由调用
+**文件**：`blueprints/douyin_api.py`
 
-**内容**：
-- `get_cover(conn, table, path)` — 查某个文件的 cover BLOB
-- `set_cover(conn, table, path, cover_data)` — 写入 cover
-- `generate_and_cache_cover(conn, table, filepath)` — 生成缩略图 + 写入 DB + 返回
+**目标**：`_pick_random_video` 改为调用 `traverse_media`，每次 limit=1，支持两种子模式。
 
-**测试**：`test/test_cover.py`
-  - get_cover 返回 None 当没有 cover
-  - set_cover 后 get_cover 返回正确数据
-  - generate_and_cache_cover 对图片/视频均有效
-  - 重复调用不重复生成
+**改动**：
+- `DOUYIN_RANDOM_MEDIA=true`：`traverse_media(..., random_start=True, exclude_paths=history)`
+- `DOUYIN_RANDOM_MEDIA=false`：`traverse_media(..., random_start=False, exclude_paths=history)`
+- 每次 limit=1，遍历位置由 session 维护的 offset 驱动
+
+**验证**：手动验证或新增测试。
 
 ---
 
-### 阶段 3：路由改造
+## ✅ 任务 5：更新 Category Browse 模式
 
-#### [x] 任务 3.1：normal_api.py — /api/list 走 DB
+**文件**：`blueprints/category_api.py`、`utils/media_utils.py`
 
-**目标**：normal 模式下列表从 DB 读取
+**目标**：
+1. 分类页预览文件改为递归取（方案 B：递归子文件夹，凑满 6 个）
+2. 网格页改为调用 `traverse_media`
+3. 删除 `cache_manager` 缓存层（`get_files_in_folder`、`set_files_cache`）
 
-**内容**：
-- 在 `/api/list` 路由中，如果 DB 存在且有数据，从 nodes 表查询返回
-- 如果 DB 不存在或无数据，调用 sync_folder 填充后再查
-- 如果 DB 不可用，回退到现有的 get_sorted_folders() + get_files_in_folder()
-- 返回数据结构不变，兼容前端
+**改动**：
+- `get_category_children_info`：预览收集改为递归进入子文件夹，`sync_folder` 核实后取直接文件
+- `_get_lazy_page_files`：改为调用 `traverse_media`
+- 删除 `cache_manager` 相关调用
 
-**测试**：`test/test_normal_api.py`
-  - Flask test client 请求 /api/list
-  - 返回结构不变
-  - 首次访问自动 sync
-  - 再次访问走缓存
+**验证**：运行 `test/test_*.py` 全部通过。
 
 ---
 
-#### [x] 任务 3.2：media_api.py — /media/load_more + thumbnail 走 DB
+## 任务 6：更新 app.py 启动逻辑
 
-**目标**：媒体模式分页和缩略图从 DB 读取
+**文件**：`app.py`
 
-**内容**：
-- load_more：根据随机/顺序模式，从 DB 取下一页
-- thumbnail：先查 DB cover，有就直接返回，没有再生成并写入
-- 删除对 _traversal_store 的依赖
+**目标**：删除启动时的全量同步和封面后台线程。
 
-**测试**：`test/test_media_api.py`
-  - load_more 返回分页结果
-  - thumbnail 返回有效图片
-  - thumbnail 第二次命中缓存
-  - 随机/顺序模式皆正确
+**改动**：
+- 删除 `sync_database(conn, str(config.MEDIA_DIR))` 调用
+- 删除 `sync_media_covers` 后台线程
+- 保留祖先链确认逻辑（由各 API 内部 `traverse_media` 处理）
+
+**验证**：启动应用，各模式首页正常加载。
 
 ---
 
-#### [x] 任务 3.3：douyin_api.py — init/next 走 DB
+## 任务 7：清理死代码
 
-**目标**：抖音模式从 DB 取视频，删除内存 dict
+**文件**：`utils/db_utils.py`、`utils/media_utils.py`
 
-**内容**：
-- init：从 videos 表随机取一条
-- next：从 videos 表随机取一条，排除 history
-- 不再维护 _douyin_store
+**目标**：删除不再使用的函数和导入。
 
-**测试**：`test/test_douyin_api.py`
-  - init 返回一个有效视频
-  - next 返回不同视频
-  - 历史去重工作
-  - 无视频时返回空
+**可能删除项**：
+- `sync_database` 函数（如果无其他调用方）
+- `sync_media_covers` 函数（如果无其他调用方）
+- `get_media_page`（如果无其他调用方）
+- `get_random_media`（如果无其他调用方）
+- `get_media_in_folder`（如果无其他调用方）
+- `get_random_media_in_folder`（如果无其他调用方）
+- `cache_manager` 相关调用
 
----
-
-#### [x] 任务 3.4：category_api.py — 走 DB
-
-**目标**：目录浏览模式从 DB 读取，不再递归 scandir
-
-**内容**：
-- category/data：查询各子文件夹及其文件数量
-- category/grid_more：分页查 media 文件
-
-**测试**：`test/test_category_api.py`
-  - 分类数据返回正确
-  - 网格分页正确
+**验证**：全文搜索确认无残留引用，运行全部测试。
 
 ---
 
-### 阶段 4：清理
+## 执行顺序
 
-#### [x] 任务 4.1：清理废弃代码
+```
+任务1 → 任务2 → 任务3 → 任务4 → 任务5 → 任务6 → 任务7
+```
 
-**目标**：删除不再使用的遍历状态管理
-
-**内容**：
-- media_utils.py：删除 _traversal_store、_traversal_lock、init_traversal、get_next_media_files、remove_traversal、init_sequential_traversal、get_next_sequential_files
-- douyin_api.py：删除 _douyin_store
-- core.py 首页路由中遍历初始化的相关代码
-
-**测试**：所有路由、所有模式功能正常
-
----
-
-### 阶段 5：GUI 集成
-
-#### [x] 任务 5.1：数据库缓存完全透明化
-
-**目标**：数据库缓存作为实现细节，对用户完全不可见
-
-**内容**：
-- 不添加任何数据库相关 GUI 控件
-- 用户选择媒体目录后自动创建数据库
-- config.DB_PATH 始终返回有效路径
-- 删除 DB_CACHE_ENABLED 属性
-
-**测试**：手动确认 GUI 无数据库相关 UI
+每个任务完成后：测试 → git commit → 下一个任务。
