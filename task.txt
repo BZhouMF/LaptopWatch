@@ -126,7 +126,7 @@ def traverse_media(conn, root_path, media_type, offset, limit,
 
 ---
 
-## 任务 7：清理死代码
+## ✅ 任务 7：清理死代码
 
 **文件**：`utils/db_utils.py`、`utils/media_utils.py`
 
