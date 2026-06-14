@@ -111,7 +111,7 @@ def traverse_media(conn, root_path, media_type, offset, limit,
 
 ---
 
-## 任务 6：更新 app.py 启动逻辑
+## ✅ 任务 6：更新 app.py 启动逻辑
 
 **文件**：`app.py`
 
