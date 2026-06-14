@@ -453,14 +453,29 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
     return [dict(r) for r in rows]
 
 
-def _collect_subfolder_tree(conn, parent_id, sort_type='name', sort_order='asc'):
-    """递归收集所有后代子文件夹，返回 [{id, path}, ...]（DFS 前序，纯 DB 读）"""
-    result = []
-    subs = get_subfolder_nodes(conn, parent_id, sort_type, sort_order)
-    for sub in subs:
-        result.append({'id': sub['id'], 'path': sub['path']})
-        result.extend(_collect_subfolder_tree(conn, sub['id'], sort_type, sort_order))
-    return result
+def _collect_subfolder_tree(conn, parent_id, media_type):
+    """递归收集所有后代子文件夹及媒体计数（单次 CTE 查询）
+
+    返回 [{id, path, media_count}, ...]，仅包含有媒体文件的文件夹。
+    """
+    rows = conn.execute("""
+        WITH RECURSIVE subdirs AS (
+            SELECT id, path, name, parent_id FROM nodes
+            WHERE parent_id = ? AND type = 1
+            UNION ALL
+            SELECT n.id, n.path, n.name, n.parent_id
+            FROM nodes n JOIN subdirs s ON n.parent_id = s.id
+            WHERE n.type = 1
+        )
+        SELECT s.id, s.path, COUNT(m.id) AS media_count
+        FROM subdirs s
+        LEFT JOIN media m ON m.parent_id = s.id AND m.media_type = ?
+        GROUP BY s.id
+        HAVING media_count > 0
+        ORDER BY s.path
+    """, (parent_id, media_type)).fetchall()
+    return [{'id': r['id'], 'path': r['path'], 'media_count': r['media_count']}
+            for r in rows]
 
 
 def get_direct_media(conn, parent_id, media_type, sort_type='name',
@@ -542,8 +557,14 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     else:
         sync_folder(conn, root_path, recursive=True)
 
-    # 纯 DB 读取完整目录树（不做文件系统扫描）
-    all_folders = _collect_subfolder_tree(conn, root_id, sort_type, sort_order)
+    # 获取根目录直接媒体文件数
+    root_count = conn.execute(
+        "SELECT COUNT(*) FROM media WHERE parent_id=? AND media_type=?",
+        (root_id, media_type),
+    ).fetchone()[0]
+
+    # 一次 CTE 查询获取所有有媒体文件的后代文件夹及计数
+    all_folders = _collect_subfolder_tree(conn, root_id, media_type)
 
     # 随机模式：轮转子文件夹列表
     if random_start and all_folders:
@@ -551,8 +572,8 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
         start_idx = _random.randint(0, len(all_folders) - 1)
         all_folders = all_folders[start_idx:] + all_folders[:start_idx]
 
-    # 构建遍历序列：根目录直接文件 + 所有后代子文件夹
-    segments = [{'id': root_id, 'path': root_path}]
+    # 构建遍历序列（仅包含有媒体文件的文件夹）
+    segments = [{'id': root_id, 'path': root_path, 'media_count': root_count}]
     segments.extend(all_folders)
 
     logger.debug(
@@ -568,9 +589,7 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     exclude_set = set(exclude_paths) if exclude_paths else set()
     seg_files_total = 0
     for idx, segment in enumerate(segments):
-        # 文件夹已在首次递归同步中核实，此处纯 DB 读取
-        _, seg_total = get_direct_media(conn, segment['id'], media_type,
-                                        sort_type, sort_order)
+        seg_total = segment['media_count']
         seg_files_total += seg_total
         if seg_total == 0:
             continue
@@ -579,7 +598,7 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
             skipped += seg_total
             continue
 
-        # offset 落在当前段内 — 取文件，exclude_paths 过滤后继续段内重试
+        # offset 落在当前段内 — 取文件
         seg_offset = max(0, offset - skipped)
 
         while len(collected) < limit:
@@ -606,19 +625,11 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
 
         skipped += seg_total
         if len(collected) >= limit:
-            # 当前段是否还有剩余文件
-            _, current_total = get_direct_media(
-                conn, segment['id'], media_type, sort_type, sort_order)
-            if seg_offset < current_total:
+            # 当前段还有剩余 或 后续段有文件 → has_more
+            if seg_offset < seg_total:
                 has_more = True
-            else:
-                # 检查后续段是否还有文件
-                for seg in segments[idx + 1:]:
-                    _, rt = get_direct_media(conn, seg['id'], media_type,
-                                             sort_type, sort_order)
-                    if rt > 0:
-                        has_more = True
-                        break
+            elif idx + 1 < len(segments):
+                has_more = True
             break
 
     next_offset = offset + len(collected)
