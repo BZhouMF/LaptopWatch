@@ -33,6 +33,8 @@ class Config:
     DOUYIN_AUTO_PLAY = os.getenv('LAPTOPWATCH_DOUYIN_AUTO_PLAY', 'true').lower() == 'true'
     # 是否默认静音（true=默认静音, false=默认有声音）
     DOUYIN_MUTED = os.getenv('LAPTOPWATCH_DOUYIN_MUTED', 'true').lower() == 'true'
+    # 是否启用随机媒体（false=按排序顺序播放）
+    DOUYIN_RANDOM_MEDIA = os.getenv('LAPTOPWATCH_DOUYIN_RANDOM_MEDIA', 'false').lower() == 'true'
     # 历史记录/反重复表最大保留条数
     DOUYIN_HISTORY_MAX = 200
 
@@ -75,7 +77,7 @@ class Config:
         '.3gp', '.3g2', '.264', '.265', '.avi', '.divx', '.f4v', '.flv',
         '.h264', '.hevc', '.m2t', '.m2ts', '.m2v', '.m4v', '.mkv', '.mov',
         '.mp4', '.mp4v', '.mpe', '.mpeg', '.mpg', '.mpv', '.mpv4', '.mqv',
-        '.mts', '.ogg', '.ogv', '.qt', '.rm', '.rmvb', '.ts', '.vob',
+        '.qt', '.rm', '.rmvb', '.vob',
         '.webm', '.wmv', '.xvid'
     }
 

@@ -207,13 +207,17 @@ def _ensure_node(conn, folder_path):
 
 
 def _upsert_media(conn, parent_id, entry, mtime, is_dir):
-    """将一条文件系统条目写入 media 表（若为媒体文件）"""
+    """将一条文件系统条目写入 media 表（若为媒体文件），返回是否写入
+
+    扩展名不再属于媒体类型时，清理可能存在的过期 media 记录。
+    """
     if is_dir:
-        return
+        return False
     ext = os.path.splitext(entry.name)[1].lower()
     media_type = _media_type_from_ext(ext)
     if media_type is None:
-        return
+        conn.execute("DELETE FROM media WHERE path=?", (entry.path,))
+        return False
 
     entry_path = entry.path
     existing = conn.execute(
@@ -230,6 +234,7 @@ def _upsert_media(conn, parent_id, entry, mtime, is_dir):
             "VALUES (?, ?, ?, ?, ?, NULL)",
             (parent_id, entry.name, media_type, entry_path, mtime),
         )
+    return True
 
 
 def sync_folder(conn, folder_path, run_mode=None, recursive=False, _depth=0):
@@ -242,6 +247,11 @@ def sync_folder(conn, folder_path, run_mode=None, recursive=False, _depth=0):
     init_tables(conn)
     folder_path = os.path.abspath(folder_path)
     folder_id = _ensure_node(conn, folder_path)
+
+    added = 0
+    updated = 0
+    deleted = 0
+    media_count = 0
 
     # 收集 DB 现有子项 {path: {col: value}}
     db_children = {}
@@ -294,7 +304,9 @@ def sync_folder(conn, folder_path, run_mode=None, recursive=False, _depth=0):
                     "type=?, is_hidden=? WHERE id=?",
                     (fs_size, fs_ext, fs_mtime, fs_type, fs_hidden, db_row['id']),
                 )
-                _upsert_media(conn, folder_id, entry, fs_mtime, is_dir)
+                updated += 1
+                if _upsert_media(conn, folder_id, entry, fs_mtime, is_dir):
+                    media_count += 1
         else:
             existing = conn.execute(
                 "SELECT id FROM nodes WHERE path=?", (entry_path,)
@@ -306,6 +318,7 @@ def sync_folder(conn, folder_path, run_mode=None, recursive=False, _depth=0):
                     (folder_id, entry.name, fs_type, fs_size, fs_ext,
                      fs_mtime, fs_hidden, existing[0]),
                 )
+                updated += 1
             else:
                 conn.execute(
                     "INSERT INTO nodes (parent_id, name, type, path, size, "
@@ -314,14 +327,24 @@ def sync_folder(conn, folder_path, run_mode=None, recursive=False, _depth=0):
                     (folder_id, entry.name, fs_type, entry_path, fs_size,
                      fs_ext, fs_mtime, fs_hidden),
                 )
-            _upsert_media(conn, folder_id, entry, fs_mtime, is_dir)
+                added += 1
+            if _upsert_media(conn, folder_id, entry, fs_mtime, is_dir):
+                media_count += 1
 
     # 删除文件系统中不存在的条目（含级联删除子节点和媒体记录）
-    for path in db_children:
-        row_id = db_children[path]['id']
+    for _path in db_children:
+        row_id = db_children[_path]['id']
         _cascade_delete_node(conn, row_id)
+        deleted += 1
 
     conn.commit()
+
+    if added or updated or deleted:
+        logger.debug(
+            "sync_folder: %s → +%d ~%d -%d media:%d recursive:%s depth:%d",
+            folder_path, added, updated, deleted, media_count,
+            recursive, _depth,
+        )
 
     if recursive:
         for row in conn.execute(
@@ -430,6 +453,20 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
     return [dict(r) for r in rows]
 
 
+def _collect_subfolder_tree(conn, parent_id, sort_type='name', sort_order='asc'):
+    """递归收集所有后代子文件夹，返回 [{id, path}, ...]（DFS 前序）
+
+    每层先 sync_folder 再查询子节点，确保 DB 中存在嵌套层级。
+    """
+    result = []
+    subs = get_subfolder_nodes(conn, parent_id, sort_type, sort_order)
+    for sub in subs:
+        sync_folder(conn, sub['path'])
+        result.append({'id': sub['id'], 'path': sub['path']})
+        result.extend(_collect_subfolder_tree(conn, sub['id'], sort_type, sort_order))
+    return result
+
+
 def get_direct_media(conn, parent_id, media_type, sort_type='name',
                      sort_order='asc', limit=None, offset=0):
     """查询某个文件夹的直接子媒体文件（不递归子文件夹）
@@ -493,9 +530,9 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     """文件夹遍历器：按需核实 + 逐文件夹收集媒体文件
 
     1. 确认祖先链，sync_folder 核实根目录
-    2. 从 nodes 获取排序后的子文件夹列表
+    2. 递归收集所有子文件夹（按排序规则）
     3. 随机模式：随机起点轮转子文件夹列表
-    4. 遍历：根目录直接文件 → 子文件夹1 → 子文件夹2 → ...
+    4. 遍历：根目录直接文件 → 子文件夹1 → 子文件夹1的子文件夹 → 子文件夹2 → ...
     5. 每个段落先 sync_folder 核实，再 get_direct_media 取文件
     6. 跳过 offset 个文件，收集 limit 个文件
 
@@ -506,31 +543,36 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     root_id = _ensure_node(conn, root_path)
     sync_folder(conn, root_path)
 
-    # 获取排序后的子文件夹
-    folders = get_subfolder_nodes(conn, root_id, sort_type, sort_order)
+    # 递归收集所有后代子文件夹
+    all_folders = _collect_subfolder_tree(conn, root_id, sort_type, sort_order)
 
     # 随机模式：轮转子文件夹列表
-    if random_start and folders:
+    if random_start and all_folders:
         import random as _random
-        start_idx = _random.randint(0, len(folders) - 1)
-        folders = folders[start_idx:] + folders[:start_idx]
+        start_idx = _random.randint(0, len(all_folders) - 1)
+        all_folders = all_folders[start_idx:] + all_folders[:start_idx]
 
-    # 构建遍历序列：根目录直接文件 + 各子文件夹
+    # 构建遍历序列：根目录直接文件 + 所有后代子文件夹
     segments = [{'id': root_id, 'path': root_path}]
-    for f in folders:
-        segments.append({'id': f['id'], 'path': f['path']})
+    segments.extend(all_folders)
+
+    logger.debug(
+        "traverse_media: root=%s type=%s offset=%d limit=%d folders=%d exclude=%d",
+        root_path, media_type, offset, limit, len(all_folders),
+        len(exclude_paths) if exclude_paths else 0,
+    )
 
     # 遍历收集
     collected = []
     skipped = 0
     has_more = False
     exclude_set = set(exclude_paths) if exclude_paths else set()
+    seg_files_total = 0
     for segment in segments:
-        # 先 sync 确保 DB 数据是最新的
-        sync_folder(conn, segment['path'])
-
+        # 文件夹已在 _collect_subfolder_tree 中同步，无需重复 scandir
         _, seg_total = get_direct_media(conn, segment['id'], media_type,
                                         sort_type, sort_order)
+        seg_files_total += seg_total
         if seg_total == 0:
             continue
 
@@ -569,6 +611,10 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
             break
 
     next_offset = offset + len(collected)
+    logger.debug(
+        "traverse_media: 返回 %d 条 has_more=%s total_files=%d",
+        len(collected), has_more, seg_files_total,
+    )
     return collected, next_offset, has_more
 
 

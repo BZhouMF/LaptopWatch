@@ -50,7 +50,7 @@ def _db_load_more(offset, limit, is_random):
             'total': 0,
         }
     except Exception as e:
-        logger.debug(f"DB load_more 失败: {e}")
+        logger.error(f"DB load_more 失败: {e}")
         return False, None
 
 
@@ -69,7 +69,7 @@ def _db_thumbnail(target_path):
             return True, jpeg_bytes, mime
         return False, None, None
     except Exception as e:
-        logger.debug(f"DB thumbnail 失败: {e}")
+        logger.error(f"DB thumbnail 失败: {e}")
         return False, None, None
 
 @media_bp.route('/load_more')

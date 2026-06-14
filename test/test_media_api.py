@@ -17,12 +17,21 @@ def temp_dir():
 
 
 @pytest.fixture
-def app(temp_dir):
+def db_path():
+    """独立 DB 路径，避免文件锁定影响 temp_dir 清理"""
+    _dir = tempfile.mkdtemp()
+    yield os.path.join(_dir, 'test.db')
+    import shutil
+    shutil.rmtree(_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def app(temp_dir, db_path):
     """Flask 应用，video 模式 + 测试媒体目录"""
     config.RUN_MODE = 'video'
     config.RANDOM_MODE = False
     config.MEDIA_DIR = Path(temp_dir)
-    config.DB_PATH = os.path.join(temp_dir, 'test.db')
+    config.DB_PATH = db_path
 
     from flask import Flask
     app = Flask(__name__)

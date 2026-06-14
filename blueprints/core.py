@@ -89,7 +89,7 @@ def index():
                 logger.debug("首页 DB 读取失败，返回空列表")
 
             template = 'media_index.html'
-            total_pages = 1
+            total_pages = 2 if has_more else 1
             return render_template(template,
                                    media_list=first_page,
                                    page_first=config.PAGE_FIRST,

@@ -42,23 +42,17 @@ def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_typ
     """从 DB 读取文件列表，失败时返回 (False, None)"""
     conn = None
     try:
-        db_path = config.DB_PATH
-        if not db_path:
+        if not config.DB_PATH:
             return False, None
 
-        from utils.db_utils import get_db, ensure_tables, sync_folder, \
-            get_children, drive_prefix
+        from utils.db_utils import get_db, sync_folder, get_children
 
-        conn = get_db(db_path)
-        prefix = drive_prefix(requested_path)
-        file_table = f'{prefix}_file'
-        ensure_tables(conn, prefix=prefix)
-        sync_folder(conn, requested_path, run_mode='normal')
+        conn = get_db()
+        sync_folder(conn, requested_path)
 
-        cursor = conn.execute(
-            f"SELECT id FROM {file_table} WHERE path=? AND type=1", (requested_path,)
-        )
-        row = cursor.fetchone()
+        row = conn.execute(
+            "SELECT id FROM nodes WHERE path=? AND type=1", (requested_path,)
+        ).fetchone()
         if not row:
             return False, None
 
@@ -68,7 +62,7 @@ def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_typ
             order_col = 'modify_time' if sort_type == 'time' else 'name'
             order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
             rows = conn.execute(
-                f"SELECT name, path, modify_time FROM {file_table} "
+                f"SELECT name, path, modify_time FROM nodes "
                 f"WHERE parent_id=? AND type=1 ORDER BY {order_col} {order_dir}",
                 (parent_id,)
             ).fetchall()
@@ -85,7 +79,7 @@ def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_typ
                 })
             return True, jsonify(result)
 
-        children = get_children(conn, file_table, parent_id, sort_type, sort_order)
+        children = get_children(conn, parent_id, sort_type, sort_order)
         files_list = [c for c in children if c['type'] == 2]
         total = len(files_list)
         paged = files_list[offset:offset + limit]

@@ -1,4 +1,4 @@
-"""测试 db_utils.py：数据库连接与表创建"""
+"""测试 db_utils.py：数据库连接、表创建、查询"""
 import os
 import sys
 import tempfile
@@ -7,12 +7,11 @@ import sqlite3
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.db_utils import get_db, ensure_tables
+from utils.db_utils import get_db, init_tables
 
 
 class TestGetDb:
     def test_returns_connection(self):
-        """get_db 返回有效的 sqlite3.Connection"""
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
             db_path = f.name
         try:
@@ -23,7 +22,6 @@ class TestGetDb:
             os.unlink(db_path)
 
     def test_wal_mode_enabled(self):
-        """连接启用了 WAL 模式"""
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
             db_path = f.name
         try:
@@ -35,7 +33,7 @@ class TestGetDb:
             os.unlink(db_path)
 
 
-class TestEnsureTables:
+class TestInitTables:
     @pytest.fixture
     def conn(self):
         with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
@@ -57,33 +55,26 @@ class TestEnsureTables:
         return {row[1] for row in cursor.fetchall()}
 
     def test_creates_nodes_table(self, conn):
-        ensure_tables(conn)
+        init_tables(conn)
         assert self._table_exists(conn, 'nodes')
         cols = self._table_columns(conn, 'nodes')
         for required in ('id', 'parent_id', 'name', 'type', 'path',
-                         'size', 'extension', 'create_time', 'modify_time', 'is_hidden'):
+                         'size', 'extension', 'modify_time', 'is_hidden'):
             assert required in cols, f"nodes 表缺少列: {required}"
 
-    def test_creates_images_table(self, conn):
-        ensure_tables(conn)
-        assert self._table_exists(conn, 'images')
-        cols = self._table_columns(conn, 'images')
-        for required in ('id', 'parent_id', 'name', 'path', 'modify_time', 'cover'):
-            assert required in cols, f"images 表缺少列: {required}"
-
-    def test_creates_videos_table(self, conn):
-        ensure_tables(conn)
-        assert self._table_exists(conn, 'videos')
-        cols = self._table_columns(conn, 'videos')
-        for required in ('id', 'parent_id', 'name', 'path', 'modify_time', 'cover'):
-            assert required in cols, f"videos 表缺少列: {required}"
+    def test_creates_media_table(self, conn):
+        init_tables(conn)
+        assert self._table_exists(conn, 'media')
+        cols = self._table_columns(conn, 'media')
+        for required in ('id', 'parent_id', 'name', 'media_type',
+                         'path', 'modify_time', 'cover'):
+            assert required in cols, f"media 表缺少列: {required}"
 
     def test_idempotent(self, conn):
-        """重复调用 ensure_tables 不报错"""
-        ensure_tables(conn)
-        ensure_tables(conn)  # 第二次调用不应抛异常
+        init_tables(conn)
+        init_tables(conn)  # 第二次调用不应抛异常
 
-    def test_all_three_tables_created(self, conn):
-        ensure_tables(conn)
-        for name in ('nodes', 'images', 'videos'):
+    def test_both_tables_created(self, conn):
+        init_tables(conn)
+        for name in ('nodes', 'media'):
             assert self._table_exists(conn, name), f"缺少表: {name}"

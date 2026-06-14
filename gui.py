@@ -699,7 +699,7 @@ class AppLauncher(tk.Tk):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     bufsize=1,
-                    universal_newlines=True,
+                    text=True, encoding='utf-8', errors='replace',
                     env=env,
                     creationflags=creationflags
                 )
@@ -709,7 +709,7 @@ class AppLauncher(tk.Tk):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     bufsize=1,
-                    universal_newlines=True,
+                    text=True, encoding='utf-8', errors='replace',
                     env=env,
                     start_new_session=True
                 )
@@ -840,7 +840,7 @@ class AppLauncher(tk.Tk):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     bufsize=1,
-                    universal_newlines=True,
+                    text=True, encoding='utf-8', errors='replace',
                     creationflags=creationflags
                 )
             else:
@@ -849,7 +849,7 @@ class AppLauncher(tk.Tk):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     bufsize=1,
-                    universal_newlines=True,
+                    text=True, encoding='utf-8', errors='replace',
                     start_new_session=True
                 )
         except Exception as e:
