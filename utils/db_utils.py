@@ -453,20 +453,6 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
     return [dict(r) for r in rows]
 
 
-def _collect_subfolder_tree(conn, parent_id, sort_type='name', sort_order='asc'):
-    """递归收集所有后代子文件夹，返回 [{id, path}, ...]（DFS 前序）
-
-    每层先 sync_folder 再查询子节点，确保 DB 中存在嵌套层级。
-    """
-    result = []
-    subs = get_subfolder_nodes(conn, parent_id, sort_type, sort_order)
-    for sub in subs:
-        sync_folder(conn, sub['path'])
-        result.append({'id': sub['id'], 'path': sub['path']})
-        result.extend(_collect_subfolder_tree(conn, sub['id'], sort_type, sort_order))
-    return result
-
-
 def get_direct_media(conn, parent_id, media_type, sort_type='name',
                      sort_order='asc', limit=None, offset=0):
     """查询某个文件夹的直接子媒体文件（不递归子文件夹）
@@ -527,38 +513,34 @@ def _format_media_row(row):
 def traverse_media(conn, root_path, media_type, offset=0, limit=36,
                    sort_type='name', sort_order='asc',
                    random_start=False, exclude_paths=None):
-    """文件夹遍历器：按需核实 + 逐文件夹收集媒体文件
+    """文件夹遍历器：用到才核实，DB 驱动，逐文件夹收集
 
-    1. 确认祖先链，sync_folder 核实根目录
-    2. 递归收集所有子文件夹（按排序规则）
-    3. 随机模式：随机起点轮转子文件夹列表
-    4. 遍历：根目录直接文件 → 子文件夹1 → 子文件夹1的子文件夹 → 子文件夹2 → ...
-    5. 每个段落先 sync_folder 核实，再 get_direct_media 取文件
-    6. 跳过 offset 个文件，收集 limit 个文件
-
+    只遍历根目录的直接子文件夹，遍历到哪个文件夹才 sync_folder 哪个。
     返回 (items, next_offset, has_more)
     """
     init_tables(conn)
     root_path = os.path.abspath(root_path)
     root_id = _ensure_node(conn, root_path)
+
+    # 同步根目录（1 层）以发现直接子文件夹
     sync_folder(conn, root_path)
 
-    # 递归收集所有后代子文件夹
-    all_folders = _collect_subfolder_tree(conn, root_id, sort_type, sort_order)
+    # 从 DB 取根目录的直接子文件夹
+    folders = get_subfolder_nodes(conn, root_id, sort_type, sort_order)
 
     # 随机模式：轮转子文件夹列表
-    if random_start and all_folders:
+    if random_start and folders:
         import random as _random
-        start_idx = _random.randint(0, len(all_folders) - 1)
-        all_folders = all_folders[start_idx:] + all_folders[:start_idx]
+        start_idx = _random.randint(0, len(folders) - 1)
+        folders = folders[start_idx:] + folders[:start_idx]
 
-    # 构建遍历序列：根目录直接文件 + 所有后代子文件夹
+    # 构建遍历序列：根目录直接文件 + 直接子文件夹
     segments = [{'id': root_id, 'path': root_path}]
-    segments.extend(all_folders)
+    segments.extend({'id': f['id'], 'path': f['path']} for f in folders)
 
     logger.debug(
         "traverse_media: root=%s type=%s offset=%d limit=%d folders=%d exclude=%d",
-        root_path, media_type, offset, limit, len(all_folders),
+        root_path, media_type, offset, limit, len(folders),
         len(exclude_paths) if exclude_paths else 0,
     )
 
@@ -568,8 +550,11 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     has_more = False
     exclude_set = set(exclude_paths) if exclude_paths else set()
     seg_files_total = 0
-    for segment in segments:
-        # 文件夹已在 _collect_subfolder_tree 中同步，无需重复 scandir
+    for idx, segment in enumerate(segments):
+        # 用到才核实：根目录已在上方同步，子文件夹遍历到才 scandir
+        if idx > 0:
+            sync_folder(conn, segment['path'])
+
         _, seg_total = get_direct_media(conn, segment['id'], media_type,
                                         sort_type, sort_order)
         seg_files_total += seg_total
@@ -607,7 +592,20 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
 
         skipped += seg_total
         if len(collected) >= limit:
-            has_more = True
+            # 当前段是否还有剩余文件
+            _, current_total = get_direct_media(
+                conn, segment['id'], media_type, sort_type, sort_order)
+            if seg_offset < current_total:
+                has_more = True
+            else:
+                # 检查后续段是否还有文件（需先同步）
+                for seg in segments[idx + 1:]:
+                    sync_folder(conn, seg['path'])
+                    _, rt = get_direct_media(conn, seg['id'], media_type,
+                                             sort_type, sort_order)
+                    if rt > 0:
+                        has_more = True
+                        break
             break
 
     next_offset = offset + len(collected)
