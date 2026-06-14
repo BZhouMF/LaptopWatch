@@ -857,6 +857,7 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     collected = []
     skipped = 0
     has_more = False
+    exclude_set = set(exclude_paths) if exclude_paths else set()
     for segment in segments:
         # 先 sync 确保 DB 数据是最新的
         sync_folder(conn, segment['path'])
@@ -870,23 +871,30 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
             skipped += seg_total
             continue
 
-        # offset 落在当前段内 — 取文件
+        # offset 落在当前段内 — 取文件，exclude_paths 过滤后继续段内重试
         seg_offset = max(0, offset - skipped)
-        remaining = limit - len(collected)
 
-        rows, _ = get_direct_media(
-            conn, segment['id'], media_type, sort_type, sort_order,
-            limit=remaining, offset=seg_offset,
-        )
-
-        if exclude_paths:
-            excluded_set = set(exclude_paths)
-            rows = [r for r in rows if r['path'] not in excluded_set]
-
-        for r in rows:
-            if len(collected) >= limit:
+        while len(collected) < limit:
+            remaining = limit - len(collected)
+            rows, _ = get_direct_media(
+                conn, segment['id'], media_type, sort_type, sort_order,
+                limit=remaining, offset=seg_offset,
+            )
+            if not rows:
                 break
-            collected.append(_format_media_row(r))
+
+            fetched_count = len(rows)
+            if exclude_set:
+                rows = [r for r in rows if r['path'] not in exclude_set]
+
+            for r in rows:
+                if len(collected) >= limit:
+                    break
+                collected.append(_format_media_row(r))
+
+            seg_offset += fetched_count
+            if fetched_count < remaining:
+                break
 
         skipped += seg_total
         if len(collected) >= limit:

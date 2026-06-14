@@ -26,37 +26,36 @@ def _save_history(history):
 
 
 def _format_video(row):
-    """将 DB 行格式化为前端视频数据"""
-    media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
-    path = row['path'].replace('\\', '/')
-    rel_path = path.replace(media_dir_str, '', 1) if media_dir_str else path
+    """将遍历结果格式化为前端视频数据"""
     return {
         'name': row['name'],
-        'relative_path': rel_path,
+        'relative_path': row['relative_path'],
         'is_video': True,
     }
 
 
 def _pick_random_video(exclude_paths):
-    """从 DB videos 表随机取一条视频，排除已播放路径
+    """从 DB 遍历文件夹取一条视频，排除已播放路径
 
     返回 dict 或 None
     """
     try:
-        db_path = config.DB_PATH
-        if not db_path:
+        if not config.DB_PATH or not config.MEDIA_DIR:
             return None
 
-        from utils.db_utils import get_db, ensure_tables, sync_folder, \
-            get_random_media, drive_prefix
+        from utils.db_utils import get_db, traverse_media
 
-        conn = get_db(db_path)
-        prefix = drive_prefix(str(config.MEDIA_DIR))
-        ensure_tables(conn, prefix=prefix)
-        if config.MEDIA_DIR:
-            sync_folder(conn, str(config.MEDIA_DIR), run_mode=config.RUN_MODE)
+        conn = get_db()
+        is_random = config.DOUYIN_RANDOM_MEDIA
 
-        rows = get_random_media(conn, f'{prefix}_v', 1, exclude_paths=exclude_paths, media_dir=config.MEDIA_DIR)
+        rows, _, _ = traverse_media(
+            conn, str(config.MEDIA_DIR), 'video',
+            offset=0, limit=1,
+            sort_type=config.SORT_TYPE,
+            sort_order=config.SORT_ORDER,
+            random_start=is_random,
+            exclude_paths=exclude_paths,
+        )
         conn.close()
         return rows[0] if rows else None
     except Exception as e:
