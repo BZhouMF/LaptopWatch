@@ -796,6 +796,108 @@ def get_direct_media(conn, parent_id, media_type, sort_type='name',
 
 
 # ---------------------------------------------------------------------------
+# 文件夹遍历器 — 按需核实 + 逐文件夹收集
+# ---------------------------------------------------------------------------
+
+
+def _format_media_row(row):
+    """将 media 表行格式化为前端统一结构"""
+    import os as _os
+    media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
+    path = row['path'].replace('\\', '/')
+    rel_path = path.replace(media_dir_str, '', 1) if media_dir_str else row['name']
+    ext = _os.path.splitext(row['name'])[1].lower()
+    from datetime import datetime
+    return {
+        'name': row['name'],
+        'path': row['path'],
+        'relative_path': rel_path,
+        'mtime': datetime.fromtimestamp(row['modify_time']).strftime('%Y-%m-%d %H:%M:%S'),
+        'timestamp': row['modify_time'],
+        'is_video': ext in config.VIDEO_EXT,
+        'is_image': ext in config.IMAGE_EXT,
+        'media_type': row['media_type'],
+    }
+
+
+def traverse_media(conn, root_path, media_type, offset=0, limit=36,
+                   sort_type='name', sort_order='asc',
+                   random_start=False, exclude_paths=None):
+    """文件夹遍历器：按需核实 + 逐文件夹收集媒体文件
+
+    1. 确认祖先链，sync_folder 核实根目录
+    2. 从 nodes 获取排序后的子文件夹列表
+    3. 随机模式：随机起点轮转子文件夹列表
+    4. 遍历：根目录直接文件 → 子文件夹1 → 子文件夹2 → ...
+    5. 每个段落先 sync_folder 核实，再 get_direct_media 取文件
+    6. 跳过 offset 个文件，收集 limit 个文件
+
+    返回 (items, next_offset, has_more)
+    """
+    init_tables(conn)
+    root_path = os.path.abspath(root_path)
+    root_id = _ensure_node(conn, root_path)
+    sync_folder(conn, root_path)
+
+    # 获取排序后的子文件夹
+    folders = get_subfolder_nodes(conn, root_id, sort_type, sort_order)
+
+    # 随机模式：轮转子文件夹列表
+    if random_start and folders:
+        import random as _random
+        start_idx = _random.randint(0, len(folders) - 1)
+        folders = folders[start_idx:] + folders[:start_idx]
+
+    # 构建遍历序列：根目录直接文件 + 各子文件夹
+    segments = [{'id': root_id, 'path': root_path}]
+    for f in folders:
+        segments.append({'id': f['id'], 'path': f['path']})
+
+    # 遍历收集
+    collected = []
+    skipped = 0
+    has_more = False
+    for segment in segments:
+        # 先 sync 确保 DB 数据是最新的
+        sync_folder(conn, segment['path'])
+
+        _, seg_total = get_direct_media(conn, segment['id'], media_type,
+                                        sort_type, sort_order)
+        if seg_total == 0:
+            continue
+
+        if skipped + seg_total <= offset:
+            skipped += seg_total
+            continue
+
+        # offset 落在当前段内 — 取文件
+        seg_offset = max(0, offset - skipped)
+        remaining = limit - len(collected)
+
+        rows, _ = get_direct_media(
+            conn, segment['id'], media_type, sort_type, sort_order,
+            limit=remaining, offset=seg_offset,
+        )
+
+        if exclude_paths:
+            excluded_set = set(exclude_paths)
+            rows = [r for r in rows if r['path'] not in excluded_set]
+
+        for r in rows:
+            if len(collected) >= limit:
+                break
+            collected.append(_format_media_row(r))
+
+        skipped += seg_total
+        if len(collected) >= limit:
+            has_more = True
+            break
+
+    next_offset = offset + len(collected)
+    return collected, next_offset, has_more
+
+
+# ---------------------------------------------------------------------------
 # 封面读写
 # ---------------------------------------------------------------------------
 

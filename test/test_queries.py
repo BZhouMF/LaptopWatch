@@ -1,12 +1,15 @@
 """测试查询接口：get_children / get_media_page / get_random_media（新 schema）"""
 import os
 import sys
+import tempfile
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.db_utils import init_tables, get_children, get_media_page, get_random_media, get_direct_media
+from config import config
+from utils.db_utils import init_tables, get_children, get_media_page, get_random_media, get_direct_media, traverse_media
 
 
 @pytest.fixture
@@ -284,3 +287,106 @@ class TestGetDirectMedia:
         rows, total = get_direct_media(conn, 1, 'image', limit=1, offset=0)
         assert len(rows) == 1
         assert total == 2
+
+
+def _make_file(path, content='x'):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(content)
+
+
+class TestTraverseMedia:
+
+    @pytest.fixture
+    def media_root(self):
+        """创建测试媒体目录结构"""
+        with tempfile.TemporaryDirectory() as td:
+            old_media = config.MEDIA_DIR
+            config.MEDIA_DIR = Path(td)
+            # root 下直接文件
+            _make_file(os.path.join(td, 'root_video.mp4'))
+            _make_file(os.path.join(td, 'root_photo.jpg'))
+            _make_file(os.path.join(td, 'note.txt'))
+            # 子文件夹 sub1
+            _make_file(os.path.join(td, 'sub1', 'v1.mp4'))
+            _make_file(os.path.join(td, 'sub1', 'v2.mp4'))
+            # 子文件夹 sub2
+            _make_file(os.path.join(td, 'sub2', 'v3.mp4'))
+            # 空子文件夹 sub_empty
+            os.makedirs(os.path.join(td, 'sub_empty'))
+            yield td
+            config.MEDIA_DIR = old_media
+
+    @pytest.fixture
+    def conn(self):
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.isolation_level = None
+        init_tables(conn)
+        yield conn
+        conn.close()
+
+    def test_collects_from_root_and_subfolders(self, conn, media_root):
+        """从根目录和子文件夹收集视频文件"""
+        items, next_offset, has_more = traverse_media(
+            conn, media_root, 'video', limit=10)
+        paths = {item['relative_path'] for item in items}
+        assert 'root_video.mp4' in paths
+        assert 'sub1/v1.mp4' in paths
+        assert 'sub1/v2.mp4' in paths
+        assert 'sub2/v3.mp4' in paths
+        assert 'root_photo.jpg' not in paths  # 不取图片
+        assert 'note.txt' not in paths
+        assert has_more is False
+
+    def test_pagination(self, conn, media_root):
+        """分页：第一页后还有更多，第二页取完"""
+        page1, offset1, more1 = traverse_media(
+            conn, media_root, 'video', limit=2)
+        assert len(page1) == 2
+        assert more1 is True
+        assert offset1 == 2
+
+        page2, offset2, more2 = traverse_media(
+            conn, media_root, 'video', offset=2, limit=10)
+        assert len(page2) == 2  # 剩余 2 个
+        assert more2 is False
+
+    def test_offset_skips_correctly(self, conn, media_root):
+        """offset 跳过前面的文件"""
+        items, _, _ = traverse_media(
+            conn, media_root, 'video', offset=2, limit=10)
+        assert len(items) == 2  # 跳过前 2 个，剩 2 个
+
+    def test_exclude_paths(self, conn, media_root):
+        """排除指定路径"""
+        all_items, _, _ = traverse_media(
+            conn, media_root, 'video', limit=10)
+        all_paths = [item['path'] for item in all_items]
+
+        exclude = [all_paths[0]]  # 排除第一个
+        items, _, _ = traverse_media(
+            conn, media_root, 'video', limit=10, exclude_paths=exclude)
+        assert len(items) == 3  # 4 个视频 - 排除 1 个
+
+    def test_random_start(self, conn, media_root):
+        """随机起点不影响文件总数"""
+        items, _, _ = traverse_media(
+            conn, media_root, 'video', limit=10, random_start=True)
+        assert len(items) == 4  # 仍然是全部 4 个视频
+
+    def test_items_have_required_keys(self, conn, media_root):
+        """返回的每个条目包含必需字段"""
+        items, _, _ = traverse_media(
+            conn, media_root, 'video', limit=1)
+        item = items[0]
+        for key in ('name', 'path', 'relative_path', 'mtime', 'timestamp',
+                    'is_video', 'is_image', 'media_type'):
+            assert key in item, f"缺少字段: {key}"
+
+    def test_image_type(self, conn, media_root):
+        """图片类型只返回图片"""
+        items, _, _ = traverse_media(
+            conn, media_root, 'image', limit=10)
+        assert len(items) == 1  # 只有 root_photo.jpg
+        assert items[0]['name'] == 'root_photo.jpg'
