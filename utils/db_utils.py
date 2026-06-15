@@ -78,8 +78,9 @@ CREATE TABLE IF NOT EXISTS media (
 
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_path  ON nodes(path);
-CREATE INDEX IF NOT EXISTS idx_media_path  ON media(path);
-CREATE INDEX IF NOT EXISTS idx_media_type  ON media(media_type);
+CREATE INDEX IF NOT EXISTS idx_media_path        ON media(path);
+CREATE INDEX IF NOT EXISTS idx_media_type        ON media(media_type);
+CREATE INDEX IF NOT EXISTS idx_media_parent_type ON media(parent_id, media_type);
 """
 
 
@@ -382,7 +383,7 @@ def get_media_page(conn, media_type, limit, offset,
     where = "m.media_type = ? AND n.type = 2"
     params = [media_type]
     if media_dir:
-        media_prefix = os.path.abspath(str(media_dir)) + os.sep
+        media_prefix = os.path.abspath(str(media_dir)).rstrip(os.sep) + os.sep
         where += " AND m.path LIKE ?"
         params.append(media_prefix + '%')
 
@@ -413,7 +414,7 @@ def get_random_media(conn, media_type, limit, exclude_paths=None, media_dir=None
     where = "m.media_type = ? AND n.type = 2"
     params = [media_type]
     if media_dir:
-        media_prefix = os.path.abspath(str(media_dir)) + os.sep
+        media_prefix = os.path.abspath(str(media_dir)).rstrip(os.sep) + os.sep
         where += " AND m.path LIKE ?"
         params.append(media_prefix + '%')
 

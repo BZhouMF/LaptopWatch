@@ -41,21 +41,24 @@ def get_files_in_folder(folder_path):
     return files
 
 
-def _get_sorted_subfolders(folder_path):
+def _get_sorted_subfolders(folder_path, conn=None):
     """获取排序后的子文件夹列表（DB 查询）"""
+    _own_conn = conn is None
     try:
         from utils.db_utils import get_db, get_node_by_path, get_subfolder_nodes
-        conn = get_db()
+        if _own_conn:
+            conn = get_db()
         node = get_node_by_path(conn, str(folder_path))
         if not node:
-            conn.close()
             return []
         rows = get_subfolder_nodes(conn, node['id'], config.SORT_TYPE, config.SORT_ORDER)
-        conn.close()
         return [{'path': r['path'], 'name': r['name'], 'mtime': 0} for r in rows]
     except Exception as e:
         logger.debug(f"_get_sorted_subfolders DB 查询失败: {e}")
         return []
+    finally:
+        if _own_conn and conn:
+            conn.close()
 
 
 def _format_file_item(f):
@@ -101,49 +104,50 @@ def _format_db_row(r):
 # ==================== 目录浏览模式工具函数 ====================
 
 
-def _collect_files_recursive(folder_path, limit, run_mode):
-    """从文件夹递归收集媒体文件（通过 traverse_media），返回最多 limit 个格式化项"""
+def _collect_files_recursive(folder_path, limit, run_mode, conn=None):
+    """从文件夹递归收集媒体文件（纯 DB 查询，不 sync），返回最多 limit 个格式化项"""
     if limit <= 0:
         return []
 
     media_type = 'video' if run_mode in ('video', 'douyin') else 'image'
+    _own_conn = conn is None
     try:
-        from utils.db_utils import get_db, traverse_media
-        conn = get_db()
-        items, _, _ = traverse_media(
-            conn, str(folder_path), media_type,
-            offset=0, limit=limit,
-            sort_type=config.SORT_TYPE,
-            sort_order=config.SORT_ORDER,
+        from utils.db_utils import get_db, get_media_page
+        if _own_conn:
+            conn = get_db()
+        rows, _ = get_media_page(
+            conn, media_type, limit, 0,
+            sort_type=config.SORT_TYPE, sort_order=config.SORT_ORDER,
+            media_dir=str(folder_path),
         )
-        conn.close()
-        return items
+        return [_format_db_row(r) for r in rows]
     except Exception as e:
         logger.debug(f"_collect_files_recursive DB 失败: {e}")
         return []
+    finally:
+        if _own_conn and conn:
+            conn.close()
 
 
-def _collect_files_recursive_random(folder_path, limit, run_mode):
-    """随机位置模式：通过 traverse_media(random_start=True) 收集文件"""
+def _collect_files_recursive_random(folder_path, limit, run_mode, conn=None):
+    """随机模式：通过 get_random_media 纯 DB 查询收集文件"""
     if limit <= 0:
         return []
 
     media_type = 'video' if run_mode in ('video', 'douyin') else 'image'
+    _own_conn = conn is None
     try:
-        from utils.db_utils import get_db, traverse_media
-        conn = get_db()
-        items, _, _ = traverse_media(
-            conn, str(folder_path), media_type,
-            offset=0, limit=limit,
-            sort_type=config.SORT_TYPE,
-            sort_order=config.SORT_ORDER,
-            random_start=True,
-        )
-        conn.close()
-        return items
+        from utils.db_utils import get_db, get_random_media
+        if _own_conn:
+            conn = get_db()
+        rows = get_random_media(conn, media_type, limit, media_dir=str(folder_path))
+        return [_format_db_row(r) for r in rows]
     except Exception as e:
         logger.debug(f"_collect_files_recursive_random DB 失败: {e}")
         return []
+    finally:
+        if _own_conn and conn:
+            conn.close()
 
 
 def get_category_children_info(folder_path, run_mode, limit=None, random_mode=False):
@@ -200,45 +204,49 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
     # 收集根目录下的直接文件（仅当前文件夹，不递归子文件夹）
     media_type = 'video' if run_mode in ('video', 'douyin') else 'image'
     try:
-        from utils.db_utils import get_db, get_node_by_path, get_direct_media
-        conn = get_db()
-        node = get_node_by_path(conn, str(folder_path))
+        from utils.db_utils import get_db, get_node_by_path, get_direct_media, sync_folder
+        shared_conn = get_db()
+        node = get_node_by_path(shared_conn, str(folder_path))
         if node:
             rows, _ = get_direct_media(
-                conn, node['id'], media_type,
+                shared_conn, node['id'], media_type,
                 config.SORT_TYPE, config.SORT_ORDER)
             result['root_files'] = [_format_db_row(r) for r in rows]
-        conn.close()
     except Exception:
         logger.debug(f"get_category_children_info: 根文件查询失败")
         result['root_files'] = []
+        shared_conn = None
 
     # 处理每个子文件夹（分类）
-    for sub in subfolders:
-        sub_path = sub['path']
-        sub_rel_path = os.path.relpath(sub_path, media_dir_str).replace('\\', '/')
+    try:
+        for sub in subfolders:
+            sub_path = sub['path']
+            sub_rel_path = os.path.relpath(sub_path, media_dir_str).replace('\\', '/')
 
-        # 检查这个子文件夹是否有子文件夹（判断是否叶子）
-        sub_subfolders = _get_sorted_subfolders(sub_path)
-        sub_is_leaf = len(sub_subfolders) == 0
+            # 检查这个子文件夹是否有子文件夹（判断是否叶子）
+            sub_subfolders = _get_sorted_subfolders(sub_path, conn=shared_conn)
+            sub_is_leaf = len(sub_subfolders) == 0
 
-        # 收集文件
-        if random_mode:
-            files = _collect_files_recursive_random(sub_path, limit, run_mode)
-        else:
-            files = _collect_files_recursive(sub_path, limit, run_mode)
+            # 收集文件（先同步再查询，确保 DB 中有该子文件夹的数据）
+            sync_folder(shared_conn, sub_path)
+            if random_mode:
+                files = _collect_files_recursive_random(sub_path, limit, run_mode, conn=shared_conn)
+            else:
+                files = _collect_files_recursive(sub_path, limit, run_mode, conn=shared_conn)
 
-        has_files = len(files) > 0
-        if not has_files:
-            continue  # 空文件夹跳过
+            has_files = len(files) > 0
+            if has_files:
+                result['categories'].append({
+                    'name': sub['name'],
+                    'path': sub_rel_path,
+                    'is_leaf': sub_is_leaf,
+                    'files': files,
+                    'has_files': has_files
+                })
 
-        result['categories'].append({
-            'name': sub['name'],
-            'path': sub_rel_path,
-            'is_leaf': sub_is_leaf,
-            'files': files,
-            'has_files': has_files
-        })
+    finally:
+        if shared_conn:
+            shared_conn.close()
 
     result['total_categories'] = len(result['categories'])
 

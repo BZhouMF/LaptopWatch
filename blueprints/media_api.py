@@ -3,9 +3,10 @@
 包含媒体模式下的API接口
 """
 import os
+import re
 import time
 import urllib.parse
-from flask import Blueprint, request, jsonify, send_from_directory, session, render_template
+from flask import Blueprint, request, jsonify, send_from_directory, session, render_template, Response
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
 from utils.media_utils import get_files_in_folder
@@ -13,6 +14,23 @@ from utils.file_utils import get_mime_type
 from blueprints.auth import login_required, require_mode
 
 media_bp = Blueprint('media_api', __name__, url_prefix='/media')
+
+# ── 全局 patch：Werkzeug FileWrapper 默认 8KB → 256KB，减少大视频的 chunk 数和 Range 请求频率 ──
+from werkzeug.wsgi import FileWrapper as _OrigFileWrapper
+
+class _BigFileWrapper(_OrigFileWrapper):
+    def __init__(self, file, buffer_size=2 * 1024 * 1024):
+        super().__init__(file, buffer_size)
+
+import werkzeug.wsgi
+werkzeug.wsgi.FileWrapper = _BigFileWrapper
+
+# ── 视频流 burst-first 策略：拖拽进度条时首块大 burst 快速填满浏览器解码缓冲 ──
+VIDEO_BURST = 4 * 1024 * 1024     # seek 时首块 4MB burst
+VIDEO_CHUNK = 1024 * 1024         # 稳态 1MB 分块
+
+# 随机模式 ID 缓存：{ (seed, media_type): (shuffled_ids, count) }
+_random_id_cache = {}
 
 
 def _media_type(run_mode=None):
@@ -27,18 +45,65 @@ def _db_load_more(offset, limit, is_random):
         if not config.DB_PATH or not config.MEDIA_DIR:
             return False, None
 
-        from utils.db_utils import get_db, traverse_media
+        from utils.db_utils import get_db, traverse_media, init_tables, sync_folder, _format_media_row
+        import os as _os
+        import random as _random
 
         conn = get_db()
         media_type = _media_type()
 
-        data, next_offset, has_more = traverse_media(
-            conn, str(config.MEDIA_DIR), media_type,
-            offset=offset, limit=limit,
-            sort_type=config.SORT_TYPE,
-            sort_order=config.SORT_ORDER,
-            random_start=is_random,
-        )
+        if is_random:
+            init_tables(conn)
+            # sync_folder 已在 index 页调用，这里只做轻量刷新（1-level scandir）
+            sync_folder(conn, str(config.MEDIA_DIR))
+
+            seed_key = '_random_seed_' + config.RUN_MODE
+            from flask import session
+            if seed_key not in session:
+                session[seed_key] = _random.randint(0, 2 ** 31 - 1)
+            seed = session[seed_key]
+
+            cache_key = (seed, media_type)
+            if cache_key in _random_id_cache:
+                all_ids, total = _random_id_cache[cache_key]
+            else:
+                media_prefix = _os.path.abspath(str(config.MEDIA_DIR)).rstrip(_os.sep) + _os.sep
+                all_ids = [
+                    row[0] for row in conn.execute(
+                        "SELECT m.id FROM media m JOIN nodes n ON n.path = m.path "
+                        "WHERE m.media_type = ? AND n.type = 2 AND m.path LIKE ?",
+                        (media_type, media_prefix + '%'),
+                    ).fetchall()
+                ]
+                rng = _random.Random(seed)
+                rng.shuffle(all_ids)
+                total = len(all_ids)
+                _random_id_cache[cache_key] = (all_ids, total)
+            page_ids = all_ids[offset:offset + limit]
+
+            if page_ids:
+                ph = ','.join('?' for _ in page_ids)
+                rows = conn.execute(
+                    f"SELECT id, parent_id, name, path, modify_time, media_type "
+                    f"FROM media WHERE id IN ({ph})",
+                    page_ids,
+                ).fetchall()
+                row_map = {r['id']: r for r in rows}
+                rows = [row_map[mid] for mid in page_ids if mid in row_map]
+            else:
+                rows = []
+
+            data = [_format_media_row(r) for r in rows]
+            next_offset = offset + len(data)
+            has_more = (next_offset < total)
+        else:
+            data, next_offset, has_more = traverse_media(
+                conn, str(config.MEDIA_DIR), media_type,
+                offset=offset, limit=limit,
+                sort_type=config.SORT_TYPE,
+                sort_order=config.SORT_ORDER,
+                random_start=False,
+            )
         conn.close()
 
         return True, {
@@ -47,7 +112,7 @@ def _db_load_more(offset, limit, is_random):
             'has_more': has_more,
             'next_offset': next_offset,
             'is_random': is_random,
-            'total': 0,
+            'total': total if is_random else 0,
         }
     except Exception as e:
         logger.error(f"DB load_more 失败: {e}")
@@ -159,6 +224,87 @@ def serve_media_empty():
     from flask import jsonify
     return jsonify({'code': 1, 'msg': '未指定文件路径'}), 400
 
+
+def _parse_range(range_header, file_size):
+    """解析 HTTP Range 头，返回 (start, end, is_seek) 或 None 表示非法范围。
+
+    Range 头格式 (RFC 7233):
+        bytes=<first>-<last>    — 指定起止偏移
+        bytes=<first>-          — 从 first 到文件末尾
+
+    示例:
+        "bytes=0-"         → (0, file_size-1, False)   首次加载
+        "bytes=524288000-" → (524288000, ..., True)    拖拽到 500MB 处
+    """
+    if not range_header:
+        return 0, file_size - 1, False
+
+    match = re.match(r'bytes=(\d+)-(\d*)$', range_header)
+    if not match:
+        return 0, file_size - 1, False
+
+    start = int(match.group(1))
+    end_str = match.group(2)
+    end = int(end_str) if end_str else file_size - 1
+
+    if start >= file_size:
+        return None
+    if end >= file_size:
+        end = file_size - 1
+
+    return start, end, (start > 0)
+
+
+def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
+    """视频流式传输，burst-first 策略优化拖拽体验。
+
+    核心思路:
+      浏览器 seek 时发 Range: bytes=POS-，但 POS 对应的字节大概率落在
+      MP4 的 P 帧/B 帧上(非关键帧)。浏览器必须读到一个 I 帧才能开始解码，
+      如果每次只发 1-2MB，可能需要等 2-3 个 chunk 才能凑到 I 帧 → 卡顿。
+
+      解决: seek 时首块读 4MB 一次性发出。4MB 在 20Mbps 码率下 ≈ 1.6 秒画面，
+      对于 GOP 长度 1~10 秒的视频，几乎一定能覆盖到至少 1 个 I 帧。
+    """
+    file_size = os.path.getsize(filepath)
+
+    parsed = _parse_range(range_header, file_size)
+    if parsed is None:
+        return Response('', status=416,
+                        headers={'Content-Range': f'bytes */{file_size}'})
+    start, end, is_seek = parsed
+
+    content_length = end - start + 1
+    has_range = bool(range_header and re.match(r'bytes=(\d+)-(\d*)$', range_header))
+
+    def generate():
+        remaining = content_length
+        with open(filepath, 'rb') as fh:
+            fh.seek(start)
+            # Burst: seek 时首块 4MB，确保浏览器一次拿到包含 I 帧的数据
+            if is_seek and remaining > VIDEO_BURST:
+                yield fh.read(VIDEO_BURST)
+                remaining -= VIDEO_BURST
+            # 稳态: 1MB 分块
+            while remaining > 0:
+                chunk = fh.read(min(VIDEO_CHUNK, remaining))
+                if not chunk:
+                    break
+                yield chunk
+                remaining -= len(chunk)
+
+    headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': str(content_length),
+        'Content-Type': mimetype,
+    }
+    if has_range:
+        headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+
+    return Response(generate(), status=206 if has_range else 200,
+                    headers=headers, direct_passthrough=True)
+
+
 @media_bp.route('/serve_media/<path:relative_path>')
 @login_required
 @require_mode('video', 'image', 'douyin')
@@ -190,24 +336,23 @@ def serve_media(relative_path):
             return '文件不存在', 404
 
         # 首次访问时记录到日志（相对路径，精简格式）
-        import os
         ext = os.path.splitext(target.name)[1].lower()
         is_video = ext in config.VIDEO_EXT
         if 'Range' not in request.headers:
             action = 'MEDIA_PLAY' if is_video else 'MEDIA_VIEW'
             log_access(request, action, decoded_relative_path.replace('\\', '/'))
-        # 注意：这里不再为Range请求记录日志，避免频繁的日志输出
-
-        # 调试日志：仅在非Range请求时记录文件信息
-        if 'Range' not in request.headers:
-            logger.debug(f"serve_media: 请求路径={relative_path}, 扩展名={target.suffix.lower()}")
 
         mime_type = get_mime_type(str(target))
 
-        logger.debug(f"serve_media: MIME类型={mime_type}")
-        directory = target.parent
-        filename = target.name
-        return send_from_directory(directory, filename, as_attachment=False, conditional=True, mimetype=mime_type)
+        if is_video:
+            # 视频：自定义 burst-first Range 处理器，优化拖拽体验
+            range_header = request.headers.get('Range', '')
+            return _stream_video_file(str(target), range_header, mime_type)
+        else:
+            # 图片：标准 send_file，文件小无需特殊优化
+            directory = target.parent
+            filename = target.name
+            return send_from_directory(directory, filename, as_attachment=False, conditional=True, mimetype=mime_type)
     except Exception as e:
         from utils.logging_utils import logger
         # 详细错误日志

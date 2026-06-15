@@ -30,3 +30,7 @@ Thumbs.db
 # Environment files
 .env
 .env.local
+
+# App generated
+db_path/
+.ffmpeg/

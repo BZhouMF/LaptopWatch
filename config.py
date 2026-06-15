@@ -17,8 +17,8 @@ class Config:
     MEDIA_DIR = Path(os.getenv('LAPTOPWATCH_MEDIA_DIR', '')).resolve() if os.getenv('LAPTOPWATCH_MEDIA_DIR') else None
     
     # ==================== 是否开启debug ====================
-    # IsDebug =  True
-    IsDebug =  False
+    IsDebug = False
+    # IsDebug = True   # 开启会导致 reloader 父子进程残留，端口无法释放
 
     # ==================== 排序配置 ====================
     SORT_TYPE = os.getenv('LAPTOPWATCH_SORT_TYPE', 'name')

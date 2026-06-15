@@ -76,8 +76,7 @@ function updatePagination() {
 
 function changePage(page) {
     if (page < 1 || page === currentPage) return;
-    if (isTraversalMode && page > totalPages + 1) return;
-    if (!isTraversalMode && page > totalPages) return;
+    if (page > totalPages + 1) return;
 
     currentPage = page;
     updatePagination();
@@ -96,7 +95,7 @@ function showLoadingPlaceholders() {
 }
 
 function loadPage(page) {
-    if (isTraversalMode && pageCache[page]) {
+    if (pageCache[page]) {
         var cached = pageCache[page];
         renderPage(cached.data, page, cached.hasMore, cached.total, cached.nextOffset);
         return;
@@ -140,14 +139,12 @@ function loadPage(page) {
             if (currentController !== controller) return;
 
             if (data.code === 0) {
-                if (isTraversalMode) {
-                    pageCache[page] = {
-                        data: data.data,
-                        hasMore: data.has_more,
-                        total: data.total,
-                        nextOffset: newOffset + data.data.length
-                    };
-                }
+                pageCache[page] = {
+                    data: data.data,
+                    hasMore: data.has_more,
+                    total: data.total,
+                    nextOffset: data.next_offset
+                };
                 renderPage(data.data, page, data.has_more, data.total, newOffset);
             } else {
                 var grid = document.getElementById('mediaGrid');
@@ -195,7 +192,7 @@ function renderPage(items, page, more, total, newOffset) {
 
     if (typeof total === 'number' && total > 0) {
         totalPages = Math.max(1, Math.ceil(total / pageLoad));
-    } else if (isTraversalMode && hasMore && currentPage >= totalPages) {
+    } else if (hasMore && currentPage >= totalPages) {
         totalPages = currentPage + 1;
     }
 

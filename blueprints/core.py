@@ -73,17 +73,59 @@ def index():
             total_count = 0
             try:
                 if config.DB_PATH and config.MEDIA_DIR:
-                    from utils.db_utils import get_db, traverse_media
+                    from utils.db_utils import get_db, traverse_media, init_tables, sync_folder, _format_media_row
+                    import os as _os
+                    import random as _random
                     conn = get_db()
                     media_type = 'video' if config.RUN_MODE == 'video' else 'image'
 
-                    first_page, _, has_more = traverse_media(
-                        conn, str(config.MEDIA_DIR), media_type,
-                        offset=0, limit=config.PAGE_FIRST,
-                        sort_type=config.SORT_TYPE,
-                        sort_order=config.SORT_ORDER,
-                        random_start=config.RANDOM_MODE,
-                    )
+                    if config.RANDOM_MODE:
+                        init_tables(conn)
+                        sync_folder(conn, str(config.MEDIA_DIR))
+
+                        seed_key = '_random_seed_' + config.RUN_MODE
+                        if seed_key not in session:
+                            session[seed_key] = _random.randint(0, 2 ** 31 - 1)
+                        seed = session[seed_key]
+
+                        media_prefix = _os.path.abspath(str(config.MEDIA_DIR)).rstrip(_os.sep) + _os.sep
+                        all_ids = [
+                            row[0] for row in conn.execute(
+                                "SELECT m.id FROM media m JOIN nodes n ON n.path = m.path "
+                                "WHERE m.media_type = ? AND n.type = 2 AND m.path LIKE ?",
+                                (media_type, media_prefix + '%'),
+                            ).fetchall()
+                        ]
+
+                        rng = _random.Random(seed)
+                        rng.shuffle(all_ids)
+
+                        total_count = len(all_ids)
+                        page_ids = all_ids[0:config.PAGE_FIRST]
+
+                        if page_ids:
+                            ph = ','.join('?' for _ in page_ids)
+                            rows = conn.execute(
+                                f"SELECT id, parent_id, name, path, modify_time, media_type "
+                                f"FROM media WHERE id IN ({ph})",
+                                page_ids,
+                            ).fetchall()
+                            row_map = {r['id']: r for r in rows}
+                            rows = [row_map[mid] for mid in page_ids if mid in row_map]
+                        else:
+                            rows = []
+
+                        for r in rows:
+                            first_page.append(_format_media_row(r))
+                        has_more = (config.PAGE_FIRST < total_count)
+                    else:
+                        first_page, _, has_more = traverse_media(
+                            conn, str(config.MEDIA_DIR), media_type,
+                            offset=0, limit=config.PAGE_FIRST,
+                            sort_type=config.SORT_TYPE,
+                            sort_order=config.SORT_ORDER,
+                            random_start=False,
+                        )
                     conn.close()
             except Exception:
                 logger.debug("首页 DB 读取失败，返回空列表")
