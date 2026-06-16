@@ -268,22 +268,69 @@ def redirect_text(filepath):
 
 @core_bp.route('/api/start_service', methods=['POST'])
 def api_start_service():
-    """启动/配置服务（demo阶段保存设置，完整版会重启 Flask）"""
+    """应用配置并更新运行时参数，生成二维码"""
     settings = request.get_json(silent=True) or {}
-    # demo: 仅回显设置，不实际切换模式
-    import socket
+
+    mode = settings.get('mode')
+    if mode:
+        config.RUN_MODE = mode
+
+    media_dir = settings.get('media_dir')
+    if media_dir:
+        from pathlib import Path
+        config.MEDIA_DIR = Path(media_dir).resolve()
+
+    sort_type = settings.get('sort_type')
+    if sort_type:
+        config.SORT_TYPE = sort_type
+
+    sort_order = settings.get('sort_order')
+    if sort_order:
+        config.SORT_ORDER = sort_order
+
+    config.RANDOM_MODE = settings.get('random', False)
+    config.DOUYIN_RANDOM_MEDIA = settings.get('douyin_random', False)
+    config.CATEGORY_BROWSE = settings.get('category_browse', False)
+
     from utils.process_utils import get_local_ip
     lan_ip = get_local_ip()
+    lan_url = f'http://{lan_ip}:5000' if lan_ip else ''
+    local_url = 'http://127.0.0.1:5000'
+
+    # 生成二维码
+    qr_base64 = ''
+    try:
+        import qrcode
+        from PIL import Image
+        import base64
+        from io import BytesIO
+        qr = qrcode.QRCode(box_size=4, border=1)
+        qr.add_data(lan_url or local_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color='black', back_color='white').convert('RGB')
+        img = img.resize((150, 150))
+        buf = BytesIO()
+        img.save(buf, format='PNG')
+        qr_base64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+    except Exception:
+        pass
+
     return {
         'code': 0,
-        'msg': '配置已保存',
-        'local_url': 'http://127.0.0.1:5000',
-        'lan_url': f'http://{lan_ip}:5000' if lan_ip else '',
+        'msg': '配置已应用',
+        'local_url': local_url,
+        'lan_url': lan_url,
+        'qr_base64': qr_base64,
         'settings': settings,
     }
 
 
 @core_bp.route('/api/stop_service', methods=['POST'])
 def api_stop_service():
-    """停止服务（demo阶段占位）"""
+    """停止服务，重置为 normal 模式"""
+    config.RUN_MODE = 'normal'
+    config.MEDIA_DIR = None
+    config.RANDOM_MODE = False
+    config.DOUYIN_RANDOM_MEDIA = False
+    config.CATEGORY_BROWSE = False
     return {'code': 0, 'msg': '服务已停止'}

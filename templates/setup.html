@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>LaptopWatch</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='css/setup.css') }}">
+<link rel="stylesheet" href="/static/css/setup.css">
 </head>
 <body>
 
@@ -93,8 +93,9 @@
 
                     <div class="card">
                         <div class="card-title">访问信息</div>
-                        <div class="qr-box">
-                            <span class="qr-placeholder">启动服务后<br>显示二维码</span>
+                        <div class="qr-box" id="qrBox">
+                            <span class="qr-placeholder" id="qrPlaceholder">启动服务后<br>显示二维码</span>
+                            <img id="qrImage" style="display:none;width:100px;height:100px;" alt="QR Code">
                         </div>
                         <input type="text" class="url-input" id="urlDisplay" value="—" readonly>
                         <button class="btn btn-secondary btn-full" id="openBrowserBtn" disabled>在浏览器中打开</button>
@@ -120,6 +121,6 @@
 
 </div>
 
-<script src="{{ url_for('static', filename='js/setup.js') }}"></script>
+<script src="/static/js/setup.js"></script>
 </body>
 </html>

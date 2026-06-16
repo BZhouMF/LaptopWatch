@@ -159,4 +159,5 @@ def handle_not_found(e):
 if __name__ == '__main__':
     from waitress import serve
     print(f"LaptopWatch 启动中... 模式: {config.RUN_MODE}")
-    serve(app, host='0.0.0.0', port=5000, threads=16)
+    port = int(os.getenv('LAPTOPWATCH_PORT', 5002))
+    serve(app, host='0.0.0.0', port=port, threads=16)

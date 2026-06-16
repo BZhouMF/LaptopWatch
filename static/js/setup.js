@@ -22,6 +22,13 @@
         stopBtn: document.getElementById('stopBtn'),
         urlDisplay: document.getElementById('urlDisplay'),
         openBrowserBtn: document.getElementById('openBrowserBtn'),
+        qrBox: document.getElementById('qrBox'),
+        qrPlaceholder: document.getElementById('qrPlaceholder'),
+        qrImage: document.getElementById('qrImage'),
+        qidStatus: document.getElementById('qidStatus'),
+        qidStartBtn: document.getElementById('qidStartBtn'),
+        qidStopBtn: document.getElementById('qidStopBtn'),
+        qidOpenBtn: document.getElementById('qidOpenBtn'),
         logViewer: document.getElementById('logViewer'),
         footerStatus: document.getElementById('footerStatus'),
         footerRuntime: document.getElementById('footerRuntime'),
@@ -129,6 +136,33 @@
         if (path) el.mediaDir.value = path;
     });
 
+    // ── 启动/停止结果处理 ──
+    function handleStartSuccess(d) {
+        running = true;
+        sessionStart = Date.now();
+        updateRunningState(true);
+        el.urlDisplay.value = d.lan_url || '';
+        if (d.qr_base64) {
+            el.qrPlaceholder.style.display = 'none';
+            el.qrImage.src = 'data:image/png;base64,' + d.qr_base64;
+            el.qrImage.style.display = 'block';
+        }
+        log(currentMode + '模式服务启动成功！');
+        log('访问地址：' + (d.lan_url || ''));
+        if (el.randomMode.checked) log('随机模式已开启，媒体浏览将从随机位置开始');
+        log('服务初始化完成，可以访问页面', 'ok');
+    }
+
+    function handleStartError(msg) {
+        log('启动失败: ' + (msg || '未知错误'), 'error');
+        el.startBtn.disabled = false;
+    }
+
+    function handleStop() {
+        log('[STOP] 服务已彻底停止');
+        updateRunningState(false);
+    }
+
     // ── 启动 ──
     el.startBtn.addEventListener('click', function () {
         var dir = el.mediaDir.value.trim();
@@ -137,8 +171,7 @@
             return;
         }
 
-        var url = '/api/start_service';
-        var body = JSON.stringify({
+        var settings = {
             mode: currentMode,
             media_dir: dir,
             sort_type: el.sortType.value,
@@ -146,39 +179,48 @@
             random: el.randomMode.checked,
             douyin_random: el.douyinRandom.checked,
             category_browse: el.categoryBrowse.checked,
-        });
+        };
 
         el.startBtn.disabled = true;
 
-        fetch(url, {
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.start_service(settings).then(function (d) {
+                if (d.code === 0) {
+                    handleStartSuccess(d);
+                } else {
+                    handleStartError(d.msg);
+                }
+            }).catch(function (e) {
+                handleStartError(e.message);
+            });
+            return;
+        }
+        // 浏览器模式兜底
+        fetch('/api/start_service', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: body,
+            body: JSON.stringify(settings),
         }).then(function (r) { return r.json(); }).then(function (d) {
             if (d.code === 0) {
-                running = true;
-                sessionStart = Date.now();
-                updateRunningState(true);
-                el.urlDisplay.value = d.lan_url || '';
-                log(currentMode + '模式服务启动成功！');
-                log('访问地址：' + (d.lan_url || ''));
-                if (el.randomMode.checked) log('随机模式已开启，媒体浏览将从随机位置开始');
-                log('服务初始化完成，可以访问页面', 'ok');
+                handleStartSuccess(d);
             } else {
-                log('启动失败: ' + (d.msg || '未知错误'), 'error');
-                el.startBtn.disabled = false;
+                handleStartError(d.msg);
             }
         }).catch(function (e) {
-            log('请求失败: ' + e.message, 'error');
-            el.startBtn.disabled = false;
+            handleStartError(e.message);
         });
     });
 
     // ── 停止 ──
     el.stopBtn.addEventListener('click', function () {
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.stop_service().then(function () {
+                handleStop();
+            }).catch(function () {});
+            return;
+        }
         fetch('/api/stop_service', { method: 'POST' }).finally(function () {
-            log('[STOP] 服务已彻底停止');
-            updateRunningState(false);
+            handleStop();
         });
     });
 
@@ -186,6 +228,56 @@
     el.openBrowserBtn.addEventListener('click', function () {
         var url = el.urlDisplay.value;
         if (url && url !== '—') window.open(url, '_blank');
+    });
+
+    // ── 管理台控制 ──
+    function _qidApi(method) {
+        if (window.pywebview && window.pywebview.api) {
+            return window.pywebview.api[method]();
+        }
+        return Promise.reject(new Error('PyWebView API 不可用'));
+    }
+
+    function _updateQidUI(running, url) {
+        el.qidStatus.textContent = running ? (url || '') : '未启动';
+        el.qidStartBtn.disabled = running;
+        el.qidStopBtn.disabled = !running;
+        el.qidOpenBtn.disabled = !running;
+    }
+
+    function refreshQidStatus() {
+        _qidApi('get_qid_status').then(function (status) {
+            _updateQidUI(status.running, status.url);
+        }).catch(function () {});
+    }
+
+    el.qidStartBtn.addEventListener('click', function () {
+        el.qidStartBtn.disabled = true;
+        _qidApi('start_qid').then(function (result) {
+            if (result.code === 0) {
+                log('管理台已启动: ' + (result.qid_url || ''));
+                _updateQidUI(true, result.qid_url);
+            } else {
+                log('管理台启动失败: ' + (result.msg || '未知错误'), 'error');
+                el.qidStartBtn.disabled = false;
+            }
+        }).catch(function (e) {
+            log('管理台启动失败: ' + e.message, 'error');
+            el.qidStartBtn.disabled = false;
+        });
+    });
+
+    el.qidStopBtn.addEventListener('click', function () {
+        _qidApi('stop_qid').then(function () {
+            log('管理台已停止');
+            _updateQidUI(false, '');
+        }).catch(function () {});
+    });
+
+    el.qidOpenBtn.addEventListener('click', function () {
+        _qidApi('open_qid').catch(function () {});
+        var ip = '127.0.0.1';
+        window.open('http://' + ip + ':5001', '_blank');
     });
 
     // ── 状态更新 ──
@@ -211,6 +303,10 @@
             el.urlDisplay.value = '—';
             sessionStart = null;
             el.footerRuntime.textContent = '';
+            // 清除二维码
+            el.qrPlaceholder.style.display = '';
+            el.qrImage.style.display = 'none';
+            el.qrImage.src = '';
             // 恢复配置控件状态
             onModeChange();
         }
@@ -227,7 +323,17 @@
         }
     }, 500);
 
+    // ── Flask 子进程日志轮询 ──
+    setInterval(function () {
+        if (!running) return;
+        if (!window.pywebview || !window.pywebview.api) return;
+        window.pywebview.api.get_flask_logs().then(function (result) {
+            (result.logs || []).forEach(function (line) { log(line); });
+        }).catch(function () {});
+    }, 1000);
+
     // ── 初始化 ──
     onModeChange();
+    refreshQidStatus();
     log('就绪', 'dim');
 })();
