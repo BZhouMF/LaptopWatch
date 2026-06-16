@@ -15,6 +15,22 @@ from blueprints.auth import login_required, require_mode
 
 core_bp = Blueprint('core', __name__)
 
+
+@core_bp.route('/setup')
+def setup_page():
+    """启动配置页面（桌面 App 入口，替代 tkinter GUI）"""
+    import socket
+    from utils.process_utils import get_local_ip
+    lan_ip = get_local_ip()
+    local_url = 'http://127.0.0.1:5000'
+    lan_url = f'http://{lan_ip}:5000' if lan_ip else ''
+    return render_template('setup.html',
+                          local_url=local_url,
+                          lan_url=lan_url,
+                          current_mode=config.RUN_MODE,
+                          media_dir=str(config.MEDIA_DIR) if config.MEDIA_DIR else '')
+
+
 @core_bp.route('/')
 @login_required
 def index():
@@ -246,3 +262,28 @@ def redirect_text(filepath):
     if query_string:
         url += f'?{query_string}'
     return redirect(url)
+
+
+# ── Setup 页面 API ──
+
+@core_bp.route('/api/start_service', methods=['POST'])
+def api_start_service():
+    """启动/配置服务（demo阶段保存设置，完整版会重启 Flask）"""
+    settings = request.get_json(silent=True) or {}
+    # demo: 仅回显设置，不实际切换模式
+    import socket
+    from utils.process_utils import get_local_ip
+    lan_ip = get_local_ip()
+    return {
+        'code': 0,
+        'msg': '配置已保存',
+        'local_url': 'http://127.0.0.1:5000',
+        'lan_url': f'http://{lan_ip}:5000' if lan_ip else '',
+        'settings': settings,
+    }
+
+
+@core_bp.route('/api/stop_service', methods=['POST'])
+def api_stop_service():
+    """停止服务（demo阶段占位）"""
+    return {'code': 0, 'msg': '服务已停止'}

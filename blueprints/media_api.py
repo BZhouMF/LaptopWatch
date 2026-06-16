@@ -15,7 +15,7 @@ from blueprints.auth import login_required, require_mode
 
 media_bp = Blueprint('media_api', __name__, url_prefix='/media')
 
-# ── 全局 patch：Werkzeug FileWrapper 默认 8KB → 256KB，减少大视频的 chunk 数和 Range 请求频率 ──
+# ── 全局 patch：Werkzeug FileWrapper 默认 8KB → 2MB，减少大视频的 chunk 数和 Range 请求频率 ──
 from werkzeug.wsgi import FileWrapper as _OrigFileWrapper
 
 class _BigFileWrapper(_OrigFileWrapper):
@@ -28,6 +28,7 @@ werkzeug.wsgi.FileWrapper = _BigFileWrapper
 # ── 视频流 burst-first 策略：拖拽进度条时首块大 burst 快速填满浏览器解码缓冲 ──
 VIDEO_BURST = 4 * 1024 * 1024     # seek 时首块 4MB burst
 VIDEO_CHUNK = 1024 * 1024         # 稳态 1MB 分块
+
 
 # 随机模式 ID 缓存：{ (seed, media_type): (shuffled_ids, count) }
 _random_id_cache = {}
@@ -258,13 +259,7 @@ def _parse_range(range_header, file_size):
 def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
     """视频流式传输，burst-first 策略优化拖拽体验。
 
-    核心思路:
-      浏览器 seek 时发 Range: bytes=POS-，但 POS 对应的字节大概率落在
-      MP4 的 P 帧/B 帧上(非关键帧)。浏览器必须读到一个 I 帧才能开始解码，
-      如果每次只发 1-2MB，可能需要等 2-3 个 chunk 才能凑到 I 帧 → 卡顿。
-
-      解决: seek 时首块读 4MB 一次性发出。4MB 在 20Mbps 码率下 ≈ 1.6 秒画面，
-      对于 GOP 长度 1~10 秒的视频，几乎一定能覆盖到至少 1 个 I 帧。
+    seek 时首块发 4MB，确保覆盖到 I 帧，浏览器无需等第二个 chunk 即可解码。
     """
     file_size = os.path.getsize(filepath)
 
@@ -277,64 +272,20 @@ def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
     content_length = end - start + 1
     has_range = bool(range_header and re.match(r'bytes=(\d+)-(\d*)$', range_header))
 
-    chunk_count = [0]   # 用 list 绕过闭包作用域，记录 chunk 数
-    total_bytes = [0]
-    t0 = time.time()
-
     def generate():
         remaining = content_length
         with open(filepath, 'rb') as fh:
             fh.seek(start)
-            # Burst: seek 时首块 4MB，确保浏览器一次拿到包含 I 帧的数据
             if is_seek and remaining > VIDEO_BURST:
-                t_read = time.time()
                 data = fh.read(VIDEO_BURST)
-                chunk_count[0] += 1
-                total_bytes[0] += len(data)
                 remaining -= len(data)
-                # 诊断日志：burst 首块耗时
-                logger.debug(
-                    f"[VIDEO_STREAM] BURST chunk=#{chunk_count[0]} "
-                    f"size={len(data)} bytes read_time={time.time() - t_read:.3f}s "
-                    f"start={start} path={os.path.basename(filepath)}")
                 yield data
-            # 稳态: 1MB 分块
             while remaining > 0:
-                t_read = time.time()
                 chunk = fh.read(min(VIDEO_CHUNK, remaining))
                 if not chunk:
                     break
-                chunk_count[0] += 1
-                total_bytes[0] += len(chunk)
                 remaining -= len(chunk)
-                # 每 10 个 chunk 打一次日志，避免刷屏
-                if chunk_count[0] % 10 == 0:
-                    elapsed = time.time() - t0
-                    speed = total_bytes[0] / elapsed / 1024 / 1024 if elapsed > 0 else 0
-                    logger.debug(
-                        f"[VIDEO_STREAM] chunk=#{chunk_count[0]} "
-                        f"sent={total_bytes[0]} bytes speed={speed:.1f} MB/s "
-                        f"path={os.path.basename(filepath)}")
                 yield chunk
-
-    # 流结束后记录总览日志（包含 User-Agent 用于区分设备）
-    def _log_complete():
-        elapsed = time.time() - t0
-        speed = total_bytes[0] / elapsed / 1024 / 1024 if elapsed > 0 else 0
-        ua = request.headers.get('User-Agent', '?')[:80]
-        logger.info(
-            f"[VIDEO_STREAM] DONE chunks={chunk_count[0]} "
-            f"sent={total_bytes[0]} bytes time={elapsed:.1f}s speed={speed:.1f} MB/s "
-            f"range={'seek' if is_seek else 'full'} "
-            f"path={os.path.basename(filepath)} "
-            f"ua={ua}")
-
-    # 在响应的最后记录（利用 WSGI close callback）
-    def _iter_with_log():
-        try:
-            yield from generate()
-        finally:
-            _log_complete()
 
     headers = {
         'Accept-Ranges': 'bytes',
@@ -344,7 +295,7 @@ def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
     if has_range:
         headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
 
-    return Response(_iter_with_log(), status=206 if has_range else 200,
+    return Response(generate(), status=206 if has_range else 200,
                     headers=headers, direct_passthrough=True)
 
 

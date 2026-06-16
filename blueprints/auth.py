@@ -21,13 +21,13 @@ def login_required(f):
 
 
 def require_mode(*modes):
-    """模式限制装饰器，统一返回 JSON 错误"""
+    """模式限制装饰器，模式不匹配时重定向到首页"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if config.RUN_MODE not in modes:
-                from flask import jsonify
-                return jsonify({'code': 1, 'msg': '当前模式不支持此接口，请刷新页面'}), 400
+                from flask import redirect
+                return redirect('/')
             return f(*args, **kwargs)
         return decorated_function
     return decorator
