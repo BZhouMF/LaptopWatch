@@ -5,7 +5,7 @@ PyWebView 桌面 App 演示 — 替代 tkinter GUI
 
 用法:
     python test_gui.py                          # 默认 normal 模式
-    python test_gui.py --mode video --dir "F:/视频"
+    python test_gui.py --port 8080              # 指定服务端口
 """
 import sys
 import os
@@ -29,11 +29,6 @@ from utils.process_utils import (
 
 def parse_args():
     parser = argparse.ArgumentParser(description='LaptopWatch 桌面 App')
-    parser.add_argument('--mode', default='normal',
-                        choices=['normal', 'video', 'image', 'douyin'],
-                        help='运行模式')
-    parser.add_argument('--dir', dest='media_dir', default=None,
-                        help='媒体目录路径')
     parser.add_argument('--port', type=int, default=5002,
                         help='服务端口')
     return parser.parse_args()
@@ -46,12 +41,26 @@ _log_index = 0        # JS 端已读取的日志索引
 _qid_process = None
 _session_logs = []
 _session_start_time = None
+_service_port = 5002  # 当前会话服务端口
+_session_logs_saved = False
+_logs_lock = threading.Lock()
 
 
 def _log(msg):
     _session_logs.append(msg)
     if len(_session_logs) > 2000:
         _session_logs.pop(0)
+
+
+def _save_logs_once(log_func):
+    """确保整个会话只保存一次日志"""
+    global _session_logs_saved
+    if not _session_logs_saved and config.SAVE_SESSION_LOGS:
+        _session_logs_saved = True
+        save_session_logs(
+            _session_logs, _session_start_time, None,
+            config.RUN_MODE, str(config.MEDIA_DIR) if config.MEDIA_DIR else '', log_func,
+        )
 
 
 # ── QR 码生成 ──
@@ -72,6 +81,23 @@ def _generate_qr_base64(url):
         return ''
 
 
+# ── 安全静态文件 Handler ──
+def _make_safe_handler(root_dir):
+    """返回一个仅允许 /templates/ 和 /static/ 路径的 HTTP handler"""
+    class _SafeHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *_args, **kw):
+            super().__init__(*_args, directory=root_dir, **kw)
+
+        def do_GET(self):
+            path = self.path.split('?')[0].split('#')[0]
+            if path.startswith('/templates/') or path.startswith('/static/'):
+                super().do_GET()
+            else:
+                self.send_error(404)
+
+    return _SafeHandler
+
+
 # ── PyWebView JS API ──
 
 class _DesktopApi:
@@ -90,7 +116,7 @@ class _DesktopApi:
 
     def start_service(self, settings):
         """启动 Flask 子进程"""
-        global _flask_process, _session_start_time
+        global _flask_process, _session_start_time, _service_port
         import datetime
 
         if _flask_process is not None and _flask_process.poll() is None:
@@ -98,7 +124,7 @@ class _DesktopApi:
 
         mode = settings.get('mode', 'normal')
         media_dir = settings.get('media_dir', '')
-        port = settings.get('port', 5002)
+        port = settings.get('port', _service_port)
 
         # 端口检查
         port_pids = check_port(port)
@@ -106,7 +132,6 @@ class _DesktopApi:
             alive = filter_alive_pids(port_pids)
             if alive:
                 return {'code': 1, 'msg': f'端口{port}被占用 (PID: {",".join(alive)})，请先停止旧服务'}
-            # stale PID
             force_kill_port(port, lambda m: None)
 
         # 找 app.py
@@ -154,20 +179,24 @@ class _DesktopApi:
             _flask_process = None
             return {'code': 1, 'msg': f'服务启动失败: {exc}'}
 
+        _service_port = port
+
         # 启动后台线程读取 Flask stdout 日志
         global _flask_logs, _log_index
         _flask_logs = []
         _log_index = 0
 
         def _read_flask_stdout():
-            global _flask_logs
+            global _flask_logs, _logs_lock
             try:
                 for line in _flask_process.stdout:
-                    _flask_logs.append(line.rstrip('\n'))
-                    if len(_flask_logs) > 500:
-                        _flask_logs.pop(0)
-            except Exception:
-                pass
+                    with _logs_lock:
+                        _flask_logs.append(line.rstrip('\n'))
+                        if len(_flask_logs) > 500:
+                            _flask_logs.pop(0)
+            except Exception as exc:
+                with _logs_lock:
+                    _flask_logs.append(f'[日志线程异常] {exc}')
 
         threading.Thread(target=_read_flask_stdout, daemon=True).start()
 
@@ -198,44 +227,40 @@ class _DesktopApi:
 
     def stop_service(self):
         """停止 Flask 子进程"""
-        global _flask_process
+        global _flask_process, _service_port
 
         if _flask_process is None:
-            # 检查是否外部启动
-            port_pids = check_port(5002)
+            port_pids = check_port(_service_port)
             alive = filter_alive_pids(port_pids) if port_pids else []
             if alive:
-                force_kill_port(5002, lambda m: None)
+                force_kill_port(_service_port, lambda m: None)
                 _log('[STOP] 外部服务已停止')
                 return {'code': 0, 'msg': '服务已停止（外部进程）'}
             return {'code': 1, 'msg': '服务未在运行'}
 
         try:
-            stop_process_gracefully(_flask_process, _flask_process.pid, 5002, lambda m: None)
+            stop_process_gracefully(_flask_process, _flask_process.pid, _service_port, lambda m: None)
             _log('[STOP] 服务已彻底停止')
         except Exception as exc:
             _log(f'[ERROR] 停止服务时出错: {exc}')
             try:
-                force_kill_port(5002, lambda m: None)
+                force_kill_port(_service_port, lambda m: None)
             except Exception:
                 pass
         finally:
-            if config.SAVE_SESSION_LOGS:
-                save_session_logs(
-                    _session_logs, _session_start_time, None,
-                    config.RUN_MODE, str(config.MEDIA_DIR) if config.MEDIA_DIR else '', lambda m: None,
-                )
+            _save_logs_once(lambda m: None)
             _flask_process = None
         return {'code': 0, 'msg': '服务已停止'}
 
     def get_service_status(self):
         """查询服务运行状态"""
+        global _service_port
         if _flask_process is not None and _flask_process.poll() is None:
-            return {'running': True, 'url': f'http://{get_local_ip()}:5002'}
-        port_pids = check_port(5002)
+            return {'running': True, 'url': f'http://{get_local_ip()}:{_service_port}'}
+        port_pids = check_port(_service_port)
         alive = filter_alive_pids(port_pids) if port_pids else []
         if alive:
-            return {'running': True, 'url': f'http://{get_local_ip()}:5002', 'external': True}
+            return {'running': True, 'url': f'http://{get_local_ip()}:{_service_port}', 'external': True}
         return {'running': False, 'url': ''}
 
     # ── 管理台 (qid.py) ──
@@ -308,11 +333,7 @@ class _DesktopApi:
         except Exception as exc:
             _log(f'[ERROR] 停止管理台时出错: {exc}')
         finally:
-            if config.SAVE_SESSION_LOGS:
-                save_session_logs(
-                    _session_logs, _session_start_time, None,
-                    config.RUN_MODE, str(config.MEDIA_DIR) if config.MEDIA_DIR else '', lambda m: None,
-                )
+            _save_logs_once(lambda m: None)
             _qid_process = None
         return {'code': 0, 'msg': '管理台已停止'}
 
@@ -323,9 +344,10 @@ class _DesktopApi:
 
     def get_flask_logs(self):
         """返回 Flask 子进程最新的 stdout 日志（增量）"""
-        global _flask_logs, _log_index
-        new_logs = _flask_logs[_log_index:]
-        _log_index = len(_flask_logs)
+        global _flask_logs, _log_index, _logs_lock
+        with _logs_lock:
+            new_logs = _flask_logs[_log_index:]
+            _log_index = len(_flask_logs)
         return {'logs': new_logs}
 
     def get_qid_status(self):
@@ -342,16 +364,17 @@ class _DesktopApi:
 # ── 主入口 ──
 
 def main():
-    global _session_start_time
+    global _session_start_time, _service_port
     import datetime
     _session_start_time = datetime.datetime.now()
 
     args = parse_args()
+    _service_port = args.port
 
-    # 从项目根目录启动静态文件服务器（随机端口，不改变 CWD）
+    # 安全静态文件服务器：仅暴露 templates/ 和 static/ 目录
     project_root = str(Path(__file__).parent)
-    handler = lambda *args, **kw: http.server.SimpleHTTPRequestHandler(*args, directory=project_root, **kw)
-    httpd = socketserver.TCPServer(('127.0.0.1', 0), handler)
+    safe_handler = _make_safe_handler(project_root)
+    httpd = socketserver.TCPServer(('127.0.0.1', 0), safe_handler)
     static_port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
@@ -369,7 +392,7 @@ def main():
     # 窗口关闭后清理
     if _flask_process is not None and _flask_process.poll() is None:
         try:
-            stop_process_gracefully(_flask_process, _flask_process.pid, 5002, lambda m: None)
+            stop_process_gracefully(_flask_process, _flask_process.pid, _service_port, lambda m: None)
         except Exception:
             pass
     if _qid_process is not None and _qid_process.poll() is None:
@@ -377,11 +400,7 @@ def main():
             stop_process_gracefully(_qid_process, None, 5001, lambda m: None)
         except Exception:
             pass
-    if config.SAVE_SESSION_LOGS:
-        save_session_logs(
-            _session_logs, _session_start_time, None,
-            config.RUN_MODE, str(config.MEDIA_DIR) if config.MEDIA_DIR else '', lambda m: None,
-        )
+    _save_logs_once(lambda m: None)
 
 
 if __name__ == '__main__':

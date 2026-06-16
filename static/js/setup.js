@@ -323,7 +323,7 @@
         }
     }, 500);
 
-    // ── Flask 子进程日志轮询 ──
+    // ── Flask 子进程日志轮询 + 崩溃检测 ──
     setInterval(function () {
         if (!running) return;
         if (!window.pywebview || !window.pywebview.api) return;
@@ -331,6 +331,17 @@
             (result.logs || []).forEach(function (line) { log(line); });
         }).catch(function () {});
     }, 1000);
+
+    setInterval(function () {
+        if (!running) return;
+        if (!window.pywebview || !window.pywebview.api) return;
+        window.pywebview.api.get_service_status().then(function (status) {
+            if (!status.running) {
+                log('服务进程已意外退出', 'error');
+                updateRunningState(false);
+            }
+        }).catch(function () {});
+    }, 3000);
 
     // ── 初始化 ──
     onModeChange();
