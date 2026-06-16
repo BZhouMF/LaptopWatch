@@ -39,7 +39,7 @@ class Config:
     DOUYIN_HISTORY_MAX = 200
     # 全屏策略：true=浏览器原生播放器(兼容最好,无自定义手势UI)
     #         false=自定义UI全屏(保留手势/倍速/亮度等,默认)
-    NATIVE_FULLSCREEN = False
+    NATIVE_FULLSCREEN = True
 
     # ==================== 日志配置 ====================
     LOG_LEVEL = os.getenv('LAPTOPWATCH_LOG_LEVEL', 'INFO').upper()

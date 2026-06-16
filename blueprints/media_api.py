@@ -277,21 +277,64 @@ def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
     content_length = end - start + 1
     has_range = bool(range_header and re.match(r'bytes=(\d+)-(\d*)$', range_header))
 
+    chunk_count = [0]   # 用 list 绕过闭包作用域，记录 chunk 数
+    total_bytes = [0]
+    t0 = time.time()
+
     def generate():
         remaining = content_length
         with open(filepath, 'rb') as fh:
             fh.seek(start)
             # Burst: seek 时首块 4MB，确保浏览器一次拿到包含 I 帧的数据
             if is_seek and remaining > VIDEO_BURST:
-                yield fh.read(VIDEO_BURST)
-                remaining -= VIDEO_BURST
+                t_read = time.time()
+                data = fh.read(VIDEO_BURST)
+                chunk_count[0] += 1
+                total_bytes[0] += len(data)
+                remaining -= len(data)
+                # 诊断日志：burst 首块耗时
+                logger.debug(
+                    f"[VIDEO_STREAM] BURST chunk=#{chunk_count[0]} "
+                    f"size={len(data)} bytes read_time={time.time() - t_read:.3f}s "
+                    f"start={start} path={os.path.basename(filepath)}")
+                yield data
             # 稳态: 1MB 分块
             while remaining > 0:
+                t_read = time.time()
                 chunk = fh.read(min(VIDEO_CHUNK, remaining))
                 if not chunk:
                     break
-                yield chunk
+                chunk_count[0] += 1
+                total_bytes[0] += len(chunk)
                 remaining -= len(chunk)
+                # 每 10 个 chunk 打一次日志，避免刷屏
+                if chunk_count[0] % 10 == 0:
+                    elapsed = time.time() - t0
+                    speed = total_bytes[0] / elapsed / 1024 / 1024 if elapsed > 0 else 0
+                    logger.debug(
+                        f"[VIDEO_STREAM] chunk=#{chunk_count[0]} "
+                        f"sent={total_bytes[0]} bytes speed={speed:.1f} MB/s "
+                        f"path={os.path.basename(filepath)}")
+                yield chunk
+
+    # 流结束后记录总览日志（包含 User-Agent 用于区分设备）
+    def _log_complete():
+        elapsed = time.time() - t0
+        speed = total_bytes[0] / elapsed / 1024 / 1024 if elapsed > 0 else 0
+        ua = request.headers.get('User-Agent', '?')[:80]
+        logger.info(
+            f"[VIDEO_STREAM] DONE chunks={chunk_count[0]} "
+            f"sent={total_bytes[0]} bytes time={elapsed:.1f}s speed={speed:.1f} MB/s "
+            f"range={'seek' if is_seek else 'full'} "
+            f"path={os.path.basename(filepath)} "
+            f"ua={ua}")
+
+    # 在响应的最后记录（利用 WSGI close callback）
+    def _iter_with_log():
+        try:
+            yield from generate()
+        finally:
+            _log_complete()
 
     headers = {
         'Accept-Ranges': 'bytes',
@@ -301,7 +344,7 @@ def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
     if has_range:
         headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
 
-    return Response(generate(), status=206 if has_range else 200,
+    return Response(_iter_with_log(), status=206 if has_range else 200,
                     headers=headers, direct_passthrough=True)
 
 
