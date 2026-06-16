@@ -157,4 +157,6 @@ def handle_not_found(e):
 
 # ==================== 启动 ====================
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=config.IsDebug, threaded=True)
+    from waitress import serve
+    print(f"LaptopWatch 启动中... 模式: {config.RUN_MODE}")
+    serve(app, host='0.0.0.0', port=5000, threads=16)
