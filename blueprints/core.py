@@ -37,7 +37,8 @@ def index():
 
             return render_template('douyin.html',
                                    auto_play=config.DOUYIN_AUTO_PLAY,
-                                   muted=config.DOUYIN_MUTED)
+                                   muted=config.DOUYIN_MUTED,
+                                   native_fullscreen=config.NATIVE_FULLSCREEN)
         elif config.CATEGORY_BROWSE:
             # 先同步所有文件到 DB
             try:

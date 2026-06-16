@@ -53,6 +53,7 @@
     const isGrid = mode === 'grid';
     const AUTO_PLAY = !isGrid && window.DOUYIN_CONFIG.autoPlay;
     const IS_MUTED = window.DOUYIN_CONFIG.muted;
+    const NATIVE_FULLSCREEN = window.DOUYIN_CONFIG.nativeFullscreen;
 
     // ==================== 状态 ====================
     let playHistory = [];
@@ -148,7 +149,7 @@
     }
 
     function toggleFullscreen() {
-        // 退出全屏
+        // ── 退出全屏 ──
         var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
         if (fsEl) {
             if (document.exitFullscreen) {
@@ -159,46 +160,86 @@
             return;
         }
 
-        // 进入全屏：优先 video 元素（移动端兼容性最好）
-        var el = activeVideo;
-        if (el.webkitEnterFullscreen) {
-            // iOS Safari < 12：只支持 video 原生全屏
-            el.webkitEnterFullscreen();
+        // ── iOS 专用路径 ──
+        var video = activeVideo;
+        if (video.webkitEnterFullscreen) {
+            video.webkitEnterFullscreen();
             updateFullscreenBtn();
             return;
         }
-        if (el.webkitSetPresentationMode) {
-            // iOS Safari 12+ iPad：支持 presentation mode
-            el.webkitSetPresentationMode('fullscreen');
+        if (video.webkitSetPresentationMode) {
+            video.webkitSetPresentationMode('fullscreen');
             updateFullscreenBtn();
             return;
         }
 
+        // ── 进入全屏：根据配置选择策略 ──
+        if (NATIVE_FULLSCREEN) {
+            // 方案 A：浏览器原生播放器（兼容性最好，无自定义 UI）
+            enterNativeFullscreen(video);
+        } else {
+            // 方案 B：容器全屏（保留手势/倍速/亮度等自定义 UI）
+            enterContainerFullscreen(video);
+        }
+    }
+
+    function enterNativeFullscreen(video) {
         var promise = null;
-        if (el.requestFullscreen) {
-            promise = el.requestFullscreen();
-        } else if (el.webkitRequestFullscreen) {
-            promise = el.webkitRequestFullscreen();
-        } else if (container.requestFullscreen) {
-            // 最后兜底：容器全屏（某些旧 Android 设备）
+        if (video.requestFullscreen) {
+            promise = video.requestFullscreen();
+        } else if (video.webkitRequestFullscreen) {
+            promise = video.webkitRequestFullscreen();
+        }
+        if (promise) {
+            promise.then(function() {
+                autoLockOrientation();
+            }).catch(function() {
+                // video 全屏失败，回退到容器
+                enterContainerFullscreen(video);
+            });
+        }
+    }
+
+    function enterContainerFullscreen(video) {
+        // 全屏前：移除 GPU 合成层诱因（will-change 在部分移动 GPU 上会黑屏）
+        video.style.willChange = 'auto';
+        video.style.transform = '';
+
+        var promise = null;
+        if (container.requestFullscreen) {
             promise = container.requestFullscreen();
+        } else if (container.webkitRequestFullscreen) {
+            promise = container.webkitRequestFullscreen();
         }
 
         if (promise) {
             promise.then(function() {
                 autoLockOrientation();
-                // 移动端全屏后强制 video 重绘，修复黑屏
-                el.style.opacity = '0.99';
-                requestAnimationFrame(function() {
-                    el.style.opacity = '';
-                });
-            }).catch(function() {
-                // video 全屏失败，尝试容器全屏
-                if (el !== container && container.requestFullscreen) {
-                    container.requestFullscreen().catch(function(){});
-                }
-            });
+                // 容器全屏后多重重绘修复，解决黑屏
+                forceVideoRepaint(video);
+            }).catch(function() {});
         }
+    }
+
+    function forceVideoRepaint(video) {
+        // 策略：逐帧切换 CSS 触发 GPU 重新合成
+        // 第 1 帧：隐藏 → 触发 layout
+        video.style.display = 'none';
+        video.offsetHeight; // 强制 reflow
+
+        // 第 2 帧：显示但缩放 1px（避免全屏下 100% 尺寸计算延迟）
+        requestAnimationFrame(function() {
+            video.style.display = 'block';
+            video.style.width = (screen.width - 1) + 'px';
+            video.style.height = (screen.height - 1) + 'px';
+            video.offsetHeight;
+
+            // 第 3 帧：恢复完整尺寸
+            requestAnimationFrame(function() {
+                video.style.width = '100%';
+                video.style.height = '100%';
+            });
+        });
     }
 
     function updateFullscreenBtn() {
@@ -880,8 +921,21 @@
         hideBrightIndicator();
         adjustType = null;
         var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-        if (!fsEl && orientationLocked) {
-            unlockOrientation();
+        if (!fsEl) {
+            // 退出全屏：恢复视频 CSS（will-change 在 enterContainerFullscreen 时被移除）
+            if (activeVideo) {
+                activeVideo.style.willChange = '';
+                activeVideo.style.display = '';
+                activeVideo.style.width = '';
+                activeVideo.style.height = '';
+            }
+            if (inactiveVideo) {
+                inactiveVideo.style.willChange = '';
+                inactiveVideo.style.display = '';
+                inactiveVideo.style.width = '';
+                inactiveVideo.style.height = '';
+            }
+            if (orientationLocked) unlockOrientation();
         }
     }
 

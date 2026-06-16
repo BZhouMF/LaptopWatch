@@ -208,7 +208,8 @@
         mode: 'grid',
         muted: true,
         mediaPath: {{ media_path|tojson|safe }},
-        isVideo: {{ is_video|tojson|safe }}
+        isVideo: {{ is_video|tojson|safe }},
+        nativeFullscreen: {{ 'true' if native_fullscreen else 'false' }}
     };
     </script>
     <script src="{{ url_for('static', filename='js/Video_Player.js') }}"></script>

@@ -546,7 +546,8 @@
     <script>
     window.DOUYIN_CONFIG = {
         autoPlay: {{ 'true' if auto_play else 'false' }},
-        muted: {{ 'true' if muted else 'false' }}
+        muted: {{ 'true' if muted else 'false' }},
+        nativeFullscreen: {{ 'true' if native_fullscreen else 'false' }}
     };
     </script>
     <script src="{{ url_for('static', filename='js/Video_Player.js') }}"></script>

@@ -481,7 +481,8 @@ def media_player():
         return render_template('player.html',
                                media_path=decoded_path.replace('\\', '/'),
                                media_name=full_path.name,
-                               is_video=is_video)
+                               is_video=is_video,
+                               native_fullscreen=config.NATIVE_FULLSCREEN)
     except Exception as e:
         logger.error(f"player 错误: {e}", exc_info=True)
         return '加载失败', 500
