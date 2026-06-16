@@ -61,6 +61,7 @@
             aspect-ratio: auto;
             width: 100vw;
             height: 100vh;
+            will-change: auto;
         }
         .douyin-container:-webkit-full-screen .douyin-video {
             max-width: none;
@@ -68,7 +69,10 @@
             aspect-ratio: auto;
             width: 100vw;
             height: 100vh;
+            will-change: auto;
         }
+        .douyin-video:fullscreen,
+        .douyin-video:-webkit-full-screen { width: 100vw; height: 100vh; object-fit: contain; will-change: auto; }
 
         /* 底部控制栏 */
         .douyin-controls {

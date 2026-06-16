@@ -148,17 +148,74 @@
     }
 
     function toggleFullscreen() {
-        if (document.fullscreenElement) {
-            document.exitFullscreen();
-        } else {
-            container.requestFullscreen().then(function() {
+        // 退出全屏
+        var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (fsEl) {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+            return;
+        }
+
+        // 进入全屏：优先 video 元素（移动端兼容性最好）
+        var el = activeVideo;
+        if (el.webkitEnterFullscreen) {
+            // iOS Safari < 12：只支持 video 原生全屏
+            el.webkitEnterFullscreen();
+            updateFullscreenBtn();
+            return;
+        }
+        if (el.webkitSetPresentationMode) {
+            // iOS Safari 12+ iPad：支持 presentation mode
+            el.webkitSetPresentationMode('fullscreen');
+            updateFullscreenBtn();
+            return;
+        }
+
+        var promise = null;
+        if (el.requestFullscreen) {
+            promise = el.requestFullscreen();
+        } else if (el.webkitRequestFullscreen) {
+            promise = el.webkitRequestFullscreen();
+        } else if (container.requestFullscreen) {
+            // 最后兜底：容器全屏（某些旧 Android 设备）
+            promise = container.requestFullscreen();
+        }
+
+        if (promise) {
+            promise.then(function() {
                 autoLockOrientation();
-            }).catch(function(){});
+                // 移动端全屏后强制 video 重绘，修复黑屏
+                el.style.opacity = '0.99';
+                requestAnimationFrame(function() {
+                    el.style.opacity = '';
+                });
+            }).catch(function() {
+                // video 全屏失败，尝试容器全屏
+                if (el !== container && container.requestFullscreen) {
+                    container.requestFullscreen().catch(function(){});
+                }
+            });
         }
     }
 
     function updateFullscreenBtn() {
-        btnFullscreenSvg.innerHTML = document.fullscreenElement ? FULLSCREEN_EXIT_ICON : FULLSCREEN_ENTER_ICON;
+        var isFS = document.fullscreenElement || document.webkitFullscreenElement;
+        btnFullscreenSvg.innerHTML = isFS ? FULLSCREEN_EXIT_ICON : FULLSCREEN_ENTER_ICON;
+    }
+
+    // iOS 专用全屏事件
+    if (activeVideo) {
+        activeVideo.addEventListener('webkitbeginfullscreen', function() {
+            updateFullscreenBtn();
+            autoLockOrientation();
+        });
+        activeVideo.addEventListener('webkitendfullscreen', function() {
+            updateFullscreenBtn();
+            unlockOrientation();
+        });
     }
 
     function autoLockOrientation() {
@@ -815,15 +872,18 @@
         resetControlsTimer();
     });
 
-    document.addEventListener('fullscreenchange', function() {
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    function onFullscreenChange() {
         updateFullscreenBtn();
         hideVolIndicator();
         hideBrightIndicator();
         adjustType = null;
-        if (!document.fullscreenElement && orientationLocked) {
+        var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+        if (!fsEl && orientationLocked) {
             unlockOrientation();
         }
-    });
+    }
 
     if (btnSkipBack) {
         btnSkipBack.addEventListener('click', function(e) {
