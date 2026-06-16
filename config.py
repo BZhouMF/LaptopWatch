@@ -30,16 +30,16 @@ class Config:
     REGENERATE_RANDOM_ON_REFRESH = os.getenv('LAPTOPWATCH_REGENERATE_ON_REFRESH', 'false').lower() == 'true'
 
     # ==================== 抖音模式配置 ====================
-    DOUYIN_AUTO_PLAY = 'true'
+    DOUYIN_AUTO_PLAY = True
     # 是否默认静音（true=默认静音, false=默认有声音）
-    DOUYIN_MUTED = 'false'
+    DOUYIN_MUTED = False
     # 是否启用随机媒体（false=按排序顺序播放）
-    DOUYIN_RANDOM_MEDIA = 'true'
+    DOUYIN_RANDOM_MEDIA = True
     # 历史记录/反重复表最大保留条数
     DOUYIN_HISTORY_MAX = 200
     # 全屏策略：true=浏览器原生播放器(兼容最好,无自定义手势UI)
     #         false=自定义UI全屏(保留手势/倍速/亮度等,默认)
-    NATIVE_FULLSCREEN = os.getenv('LAPTOPWATCH_NATIVE_FULLSCREEN', 'false').lower() == 'true'
+    NATIVE_FULLSCREEN = False
 
     # ==================== 日志配置 ====================
     LOG_LEVEL = os.getenv('LAPTOPWATCH_LOG_LEVEL', 'INFO').upper()
