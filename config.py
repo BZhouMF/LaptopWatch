@@ -15,6 +15,7 @@ class Config:
     # ==================== 运行模式配置 ====================
     RUN_MODE = os.getenv('LAPTOPWATCH_MODE', 'normal')
     MEDIA_DIR = Path(os.getenv('LAPTOPWATCH_MEDIA_DIR', '')).resolve() if os.getenv('LAPTOPWATCH_MEDIA_DIR') else None
+    VIDEO_SERVE_PORT = int(os.getenv('LAPTOPWATCH_VIDEO_PORT', 5001))
     
     # ==================== 是否开启debug ====================
     IsDebug = False

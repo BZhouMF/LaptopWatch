@@ -54,7 +54,7 @@ FRONTEND_ROUTES = {
     'apiListAll': '/api/list_all',
     'mediaLoadMore': '/media/load_more',
     'mediaThumbnail': '/media/thumbnail/',
-    'mediaServe': '/media/serve_media/',
+    # mediaServe 由 app.py context_processor 动态注入（含 host:port，支持 LAN 访问）
     'mediaDownload': '/media/download_media/',
     'mediaNavigate': '/media/navigate',
     'fileRaw': '/file/raw/',

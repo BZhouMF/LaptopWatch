@@ -82,7 +82,12 @@ from routes_config import FRONTEND_ROUTES
 
 @app.context_processor
 def inject_routes():
-    return {'ROUTES': FRONTEND_ROUTES, 'config': config}
+    """注入前端路由常量，mediaServe 动态拼接（支持 LAN 访问不同主机 IP）"""
+    from flask import request
+    host = request.host.split(':')[0]
+    routes = dict(FRONTEND_ROUTES)
+    routes['mediaServe'] = f'http://{host}:{config.VIDEO_SERVE_PORT}/media/serve_media/'
+    return {'ROUTES': routes, 'config': config}
 
 
 @app.template_filter('path_quote')
@@ -157,7 +162,29 @@ def handle_not_found(e):
 
 # ==================== 启动 ====================
 if __name__ == '__main__':
+    import threading
+    import uvicorn
     from waitress import serve
-    print(f"LaptopWatch 启动中... 模式: {config.RUN_MODE}")
+    from video_server import video_app
+
+    # 1. FastAPI 视频服务（异步线程，专用于大文件流式传输）
+    fastapi_ready = threading.Event()
+
+    def _run_fastapi():
+        uvicorn_config = uvicorn.Config(
+            video_app, host='0.0.0.0', port=config.VIDEO_SERVE_PORT,
+            log_level='warning',
+        )
+        server = uvicorn.Server(uvicorn_config)
+        fastapi_ready.set()
+        server.run()
+
+    threading.Thread(target=_run_fastapi, daemon=True).start()
+    fastapi_ready.wait(timeout=5)
+
+    # 2. Flask 主应用（页面渲染 + API + 鉴权）
     port = int(os.getenv('LAPTOPWATCH_PORT', 5002))
+    print(f"LaptopWatch 启动中... 模式: {config.RUN_MODE}")
+    print(f"  Flask  (页面/API): http://0.0.0.0:{port}")
+    print(f"  FastAPI (视频流):  http://0.0.0.0:{config.VIDEO_SERVE_PORT}")
     serve(app, host='0.0.0.0', port=port, threads=16)

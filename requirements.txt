@@ -1,5 +1,7 @@
 # Web 框架
 Flask>=2.3
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
 
 # 图像处理（图片预览、缩略图、二维码生成）
 Pillow>=10.0
