@@ -577,15 +577,17 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
             skipped += seg_total
             continue
 
-        # offset 落在当前段内 — 取文件
+        # offset 落在当前段内 — 取文件（翻页处理 exclude 过滤）
         seg_offset = max(0, offset - skipped)
 
-        rows, _ = get_direct_media(
-            conn, seg_id, media_type, sort_type, sort_order,
-            limit=limit - len(collected), offset=seg_offset,
-        )
-        if rows:
+        while len(collected) < limit and seg_offset < seg_total:
+            rows, _ = get_direct_media(
+                conn, seg_id, media_type, sort_type, sort_order,
+                limit=limit - len(collected), offset=seg_offset,
+            )
             fetched_count = len(rows)
+            if not rows:
+                break
             if exclude_set:
                 rows = [r for r in rows if r['path'] not in exclude_set]
             for r in rows:
