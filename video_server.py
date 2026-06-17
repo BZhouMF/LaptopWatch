@@ -1,6 +1,6 @@
 """
 FastAPI 视频流服务
-异步非阻塞 + 恒速平滑传输 + 断连保护，专用于大文件视频流式传输
+异步非阻塞 + TCP 自然流控 + 大块传输，专用于大文件视频流式传输
 """
 import os
 import re
@@ -17,7 +17,6 @@ from flask.sessions import TaggedJSONSerializer
 from config import config
 from utils.file_utils import get_mime_type
 
-# ── 日志：静默正常传输，仅记录异常 ──
 _stream_logger = logging.getLogger('video_server')
 _stream_logger.setLevel(logging.WARNING)
 
@@ -35,11 +34,8 @@ video_app = FastAPI()
 
 MEDIA_DIR = config.MEDIA_DIR.resolve() if config.MEDIA_DIR else None
 
-# ── 恒速参数（env 可覆盖） ──
-VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 2 * 1024 * 1024))  # 2MB
-# 目标发送速率 MB/s，默认 30 MB/s = 240 Mbps
-# 高码率 4K 原盘 ~128 Mbps，30MB/s 有 2x 余量；手机 WiFi 5GHz 通常 >200Mbps
-TARGET_SPEED_MB = float(os.getenv('LAPTOPWATCH_VIDEO_SPEED_MB', 30))
+# 大块读取：2MB 减少系统调用和事件循环往返次数
+VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 2 * 1024 * 1024))
 
 # —— Flask session cookie 验证 ——
 _session_serializer = URLSafeTimedSerializer(
@@ -81,68 +77,34 @@ def _is_video(filepath: str) -> bool:
     return os.path.splitext(filepath)[1].lower() in config.VIDEO_EXT
 
 
-async def _video_chunk_generator(filepath: str, start: int, end: int,
-                                 request: Request, logger: logging.Logger):
+async def _video_chunk_generator(filepath: str, start: int, end: int):
     """
-    恒速异步视频块生成器。
+    异步视频块生成器 — 大块读取，不做人为调速。
 
-    每个 chunk 发送后计算实际耗时，若快于目标速率则 sleep 补齐。
-    不使用突发——从头到尾维持恒定速率，避免 TCP 拥塞崩溃。
-    检测客户端断开即停。
+    依赖 TCP 协议栈的拥塞控制自然调节发送速率：
+    - 每块 yield 后 Starlette 调用 await send() 写入 asyncio transport
+    - transport 缓冲区满时 send() 自然阻塞 → 背压回传到生成器
+    - 不引入人为 sleep，避免暂停间隔导致移动端判定连接超时
+
+    客户端断开时 Starlette 停止迭代，生成器自然终止。
     """
     remaining = end - start + 1
-    total_bytes = remaining
-    chunk_count = 0
-    t_start = time.monotonic()
-
-    target_chunk_time = VIDEO_CHUNK / (TARGET_SPEED_MB * 1024 * 1024)
-
     with open(filepath, 'rb') as fh:
         fh.seek(start)
         while remaining > 0:
             chunk_size = min(VIDEO_CHUNK, remaining)
-            t_chunk_start = time.monotonic()
-
             data = fh.read(chunk_size)
             if not data:
                 break
-
             remaining -= len(data)
-            chunk_count += 1
             yield data
-
-            # 检查客户端断开
-            if await request.is_disconnected():
-                elapsed = time.monotonic() - t_start
-                sent_bytes = total_bytes - remaining
-                speed = (sent_bytes / 1024 / 1024 / elapsed) if elapsed > 0 else 0
-                logger.warning(
-                    f"[断连] {os.path.basename(filepath)} | "
-                    f"已发 {sent_bytes/1024/1024:.0f}/{total_bytes/1024/1024:.0f}MB | "
-                    f"均速 {speed:.1f}MB/s"
-                )
-                return
-
-            # 恒速控制：实际耗时短于目标则补齐
-            elapsed = time.monotonic() - t_chunk_start
-            sleep_time = target_chunk_time - elapsed
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
-
-    # 大文件传输完成（>50MB）才记录
-    elapsed = time.monotonic() - t_start
-    if total_bytes > 50 * 1024 * 1024:
-        speed = (total_bytes / 1024 / 1024 / elapsed) if elapsed > 0 else 0
-        logger.info(
-            f"[完成] {os.path.basename(filepath)} | "
-            f"{total_bytes/1024/1024:.0f}MB | {chunk_count}块 | "
-            f"{elapsed:.1f}s | {speed:.1f}MB/s"
-        )
+            # 每块后让出事件循环，避免独占
+            await asyncio.sleep(0)
 
 
 @video_app.get("/media/serve_media/{file_path:path}")
 async def serve_video(file_path: str, request: Request):
-    """视频流式传输 — 恒速 + Range 支持 + 断连保护"""
+    """视频流式传输 — 大块 + TCP 自然流控 + Range 支持"""
     if not _check_login(request):
         return Response(status_code=403)
 
@@ -180,7 +142,7 @@ async def serve_video(file_path: str, request: Request):
             headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
 
         return StreamingResponse(
-            _video_chunk_generator(str(target), start, end, request, _stream_logger),
+            _video_chunk_generator(str(target), start, end),
             status_code=206 if has_range else 200,
             headers=headers,
             media_type=mimetype,
