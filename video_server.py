@@ -1,6 +1,6 @@
 """
 FastAPI 视频流服务
-异步非阻塞 + TCP 自然流控 + 大块传输，专用于大文件视频流式传输
+小块匀速传输，降低移动端网络栈压力，专用于大文件视频流式传输
 """
 import os
 import re
@@ -34,8 +34,9 @@ video_app = FastAPI()
 
 MEDIA_DIR = config.MEDIA_DIR.resolve() if config.MEDIA_DIR else None
 
-# 大块读取：2MB 减少系统调用和事件循环往返次数
-VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 2 * 1024 * 1024))
+# ── 小块匀速参数（env 可覆盖） ──
+VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 512 * 1024))       # 512KB
+TARGET_SPEED_MB = float(os.getenv('LAPTOPWATCH_VIDEO_SPEED_MB', 20))       # 20 MB/s
 
 # —— Flask session cookie 验证 ——
 _session_serializer = URLSafeTimedSerializer(
@@ -79,32 +80,39 @@ def _is_video(filepath: str) -> bool:
 
 async def _video_chunk_generator(filepath: str, start: int, end: int):
     """
-    异步视频块生成器 — 大块读取，不做人为调速。
+    小块匀速生成器 — 每块发送后按目标速率补齐等待时间。
 
-    依赖 TCP 协议栈的拥塞控制自然调节发送速率：
-    - 每块 yield 后 Starlette 调用 await send() 写入 asyncio transport
-    - transport 缓冲区满时 send() 自然阻塞 → 背压回传到生成器
-    - 不引入人为 sleep，避免暂停间隔导致移动端判定连接超时
-
-    客户端断开时 Starlette 停止迭代，生成器自然终止。
+    512KB + 25ms 间隔 = 20MB/s 匀速细流：
+    - 速度足够支撑 1080p/4K 播放（最高 ~128Mbps = 16MB/s）
+    - 小块不撑爆路由器缓冲区 → 零丢包 → 老手机网络栈不抢 CPU
+    - 25ms 间隔在移动端 HTTP 超时阈值内 → 不被判定为连接僵死
+    - 若 send() 阻塞超过目标时间则跳过 sleep（网络拥塞时自适应）
     """
     remaining = end - start + 1
+    chunk_time = VIDEO_CHUNK / (TARGET_SPEED_MB * 1024 * 1024)
+
     with open(filepath, 'rb') as fh:
         fh.seek(start)
         while remaining > 0:
+            t0 = time.monotonic()
+
             chunk_size = min(VIDEO_CHUNK, remaining)
             data = fh.read(chunk_size)
             if not data:
                 break
             remaining -= len(data)
             yield data
-            # 每块后让出事件循环，避免独占
-            await asyncio.sleep(0)
+
+            # 匀速：实际耗时短于目标则补齐
+            elapsed = time.monotonic() - t0
+            wait = chunk_time - elapsed
+            if wait > 0:
+                await asyncio.sleep(wait)
 
 
 @video_app.get("/media/serve_media/{file_path:path}")
 async def serve_video(file_path: str, request: Request):
-    """视频流式传输 — 大块 + TCP 自然流控 + Range 支持"""
+    """视频流式传输 — 小块匀速 + Range 支持"""
     if not _check_login(request):
         return Response(status_code=403)
 
