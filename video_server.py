@@ -19,12 +19,17 @@ from utils.file_utils import get_mime_type
 
 _stream_logger = logging.getLogger('video_server')
 _stream_logger.setLevel(logging.WARNING)
+_stream_logger.propagate = False  # 不重复输出到 root logger
 
+# 只拿 Flask 的文件 handler，避免每个 handler 写一次导致日志重复
 _flask_logger = logging.getLogger('utils.logging_utils')
-for _handler in _flask_logger.handlers if _flask_logger.handlers else logging.getLogger().handlers:
-    if isinstance(_handler, logging.Handler):
+_added = False
+for _handler in (_flask_logger.handlers or logging.getLogger().handlers):
+    if isinstance(_handler, logging.FileHandler):
         _stream_logger.addHandler(_handler)
-if not _stream_logger.handlers:
+        _added = True
+        break
+if not _added:
     _stream_logger.addHandler(logging.StreamHandler())
     _stream_logger.handlers[0].setFormatter(logging.Formatter(
         '[%(asctime)s] [VIDEO] %(message)s', datefmt='%Y-%m-%d %H:%M:%S'
@@ -35,8 +40,9 @@ video_app = FastAPI()
 MEDIA_DIR = config.MEDIA_DIR.resolve() if config.MEDIA_DIR else None
 
 # ── 小块匀速参数（env 可覆盖） ──
-VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 512 * 1024))       # 512KB
-TARGET_SPEED_MB = float(os.getenv('LAPTOPWATCH_VIDEO_SPEED_MB', 20))       # 20 MB/s
+VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 512 * 1024))         # 512KB
+TARGET_SPEED_MB = float(os.getenv('LAPTOPWATCH_VIDEO_SPEED_MB', 30))         # 30 MB/s
+PRIME_MB = float(os.getenv('LAPTOPWATCH_VIDEO_PRIME_MB', 8))                 # 首段 8MB 不限速
 
 # —— Flask session cookie 验证 ——
 _session_serializer = URLSafeTimedSerializer(
@@ -110,13 +116,18 @@ def _device_label(request: Request) -> str:
 
 async def _video_chunk_generator(filepath: str, start: int, end: int):
     """
-    小块匀速生成器 — 每块发送后按目标速率补齐等待时间。
+    小块匀速生成器 — 首段不限速填满浏览器缓冲，之后按目标速率匀速。
+
+    PRIME_MB（默认8MB）：磁盘速度直发，浏览器快速建立播放缓冲
+    TARGET_SPEED_MB（默认30MB/s）：缓冲建立后的匀速续流
     """
     total_bytes = end - start + 1
     remaining = total_bytes
     chunk_time = VIDEO_CHUNK / (TARGET_SPEED_MB * 1024 * 1024)
+    prime_bytes = PRIME_MB * 1024 * 1024
     chunk_count = 0
     t_start = time.monotonic()
+    in_prime = True  # 首段不限速
 
     with open(filepath, 'rb') as fh:
         fh.seek(start)
@@ -131,13 +142,21 @@ async def _video_chunk_generator(filepath: str, start: int, end: int):
             chunk_count += 1
             yield data
 
-            # 匀速：实际耗时短于目标则补齐
-            elapsed = time.monotonic() - t0
-            wait = chunk_time - elapsed
-            if wait > 0:
-                await asyncio.sleep(wait)
+            # 首段已全部发送完毕，进入匀速阶段
+            if in_prime and (total_bytes - remaining) >= prime_bytes:
+                in_prime = False
 
-    # 传输结束（正常完成或被 Starlette 捕获断连后自然结束）
+            if in_prime:
+                # 首段不限速，仅让出事件循环
+                await asyncio.sleep(0)
+            else:
+                # 匀速：实际耗时短于目标则补齐
+                elapsed = time.monotonic() - t0
+                wait = chunk_time - elapsed
+                if wait > 0:
+                    await asyncio.sleep(wait)
+
+    # 传输结束
     elapsed = time.monotonic() - t_start
     sent_bytes = total_bytes - remaining
     speed = (sent_bytes / 1024 / 1024 / elapsed) if elapsed > 0 else 0
