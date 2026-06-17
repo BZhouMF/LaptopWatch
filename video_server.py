@@ -78,18 +78,45 @@ def _is_video(filepath: str) -> bool:
     return os.path.splitext(filepath)[1].lower() in config.VIDEO_EXT
 
 
+def _device_label(request: Request) -> str:
+    """从 User-Agent 提取设备标识（临时诊断用）"""
+    ua = request.headers.get('user-agent', '')
+    if not ua:
+        return 'unknown'
+    ua_lower = ua.lower()
+    if 'android' in ua_lower:
+        # 尝试提取 Android 版本和手机型号
+        import re as _re
+        model = ''
+        android_ver = ''
+        m = _re.search(r'android\s+(\d+[.\d]*)', ua_lower)
+        if m:
+            android_ver = m.group(1)
+        # 常见手机型号标识
+        for pattern in ['huawei', 'xiaomi', 'samsung', 'oppo', 'vivo', 'oneplus', 'pixel']:
+            idx = ua_lower.find(pattern)
+            if idx != -1:
+                model = ua[idx:idx+30].split(';')[0].strip()
+                break
+        if model:
+            return f'Android{android_ver}({model})'
+        return f'Android{android_ver}'
+    if 'iphone' in ua_lower or 'ipad' in ua_lower:
+        return 'iOS'
+    if 'windows' in ua_lower:
+        return 'Windows'
+    return 'other'
+
+
 async def _video_chunk_generator(filepath: str, start: int, end: int):
     """
     小块匀速生成器 — 每块发送后按目标速率补齐等待时间。
-
-    512KB + 25ms 间隔 = 20MB/s 匀速细流：
-    - 速度足够支撑 1080p/4K 播放（最高 ~128Mbps = 16MB/s）
-    - 小块不撑爆路由器缓冲区 → 零丢包 → 老手机网络栈不抢 CPU
-    - 25ms 间隔在移动端 HTTP 超时阈值内 → 不被判定为连接僵死
-    - 若 send() 阻塞超过目标时间则跳过 sleep（网络拥塞时自适应）
     """
-    remaining = end - start + 1
+    total_bytes = end - start + 1
+    remaining = total_bytes
     chunk_time = VIDEO_CHUNK / (TARGET_SPEED_MB * 1024 * 1024)
+    chunk_count = 0
+    t_start = time.monotonic()
 
     with open(filepath, 'rb') as fh:
         fh.seek(start)
@@ -101,6 +128,7 @@ async def _video_chunk_generator(filepath: str, start: int, end: int):
             if not data:
                 break
             remaining -= len(data)
+            chunk_count += 1
             yield data
 
             # 匀速：实际耗时短于目标则补齐
@@ -108,6 +136,16 @@ async def _video_chunk_generator(filepath: str, start: int, end: int):
             wait = chunk_time - elapsed
             if wait > 0:
                 await asyncio.sleep(wait)
+
+    # 传输结束（正常完成或被 Starlette 捕获断连后自然结束）
+    elapsed = time.monotonic() - t_start
+    sent_bytes = total_bytes - remaining
+    speed = (sent_bytes / 1024 / 1024 / elapsed) if elapsed > 0 else 0
+    _stream_logger.warning(
+        f"[传输] {os.path.basename(filepath)} | "
+        f"已发 {sent_bytes/1024/1024:.1f}/{total_bytes/1024/1024:.1f}MB | "
+        f"{chunk_count}块 | {elapsed:.1f}s | 均速 {speed:.1f}MB/s"
+    )
 
 
 @video_app.get("/media/serve_media/{file_path:path}")
@@ -140,6 +178,15 @@ async def serve_video(file_path: str, request: Request):
         start, end = parsed
         content_length = end - start + 1
         has_range = bool(range_header and range_header.startswith('bytes='))
+
+        client_ip = request.client.host if request.client else '?'
+        device = _device_label(request)
+        range_label = f'{start/1024/1024:.0f}-{end/1024/1024:.0f}MB' if has_range else '全文件'
+        _stream_logger.warning(
+            f"[请求] {client_ip} | {device} | {target.name} "
+            f"({file_size/1024/1024:.0f}MB) | Range: {range_label} | "
+            f"返回段 {content_length/1024/1024:.1f}MB"
+        )
 
         headers = {
             'Accept-Ranges': 'bytes',
