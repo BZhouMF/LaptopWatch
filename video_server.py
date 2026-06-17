@@ -1,6 +1,6 @@
 """
 FastAPI 视频流服务
-异步非阻塞 + 令牌桶调速 + 断连保护，专用于大文件视频流式传输
+异步非阻塞 + 恒速平滑传输 + 断连保护，专用于大文件视频流式传输
 """
 import os
 import re
@@ -17,7 +17,7 @@ from flask.sessions import TaggedJSONSerializer
 from config import config
 from utils.file_utils import get_mime_type
 
-# ── 日志：只记异常，不记正常传输 ──
+# ── 日志：静默正常传输，仅记录异常 ──
 _stream_logger = logging.getLogger('video_server')
 _stream_logger.setLevel(logging.WARNING)
 
@@ -35,12 +35,11 @@ video_app = FastAPI()
 
 MEDIA_DIR = config.MEDIA_DIR.resolve() if config.MEDIA_DIR else None
 
-# ── 可调参数（env 覆盖） ──
+# ── 恒速参数（env 可覆盖） ──
 VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 2 * 1024 * 1024))  # 2MB
-# 目标发送速率（MB/s），默认 20 MB/s = 160 Mbps，足以支撑 4K 原盘
-TARGET_SPEED_MB = float(os.getenv('LAPTOPWATCH_VIDEO_SPEED_MB', 20))
-# 突发缓冲（MB），允许浏览器初始加载时短时间超速
-BURST_MB = float(os.getenv('LAPTOPWATCH_VIDEO_BURST_MB', 16))
+# 目标发送速率 MB/s，默认 30 MB/s = 240 Mbps
+# 高码率 4K 原盘 ~128 Mbps，30MB/s 有 2x 余量；手机 WiFi 5GHz 通常 >200Mbps
+TARGET_SPEED_MB = float(os.getenv('LAPTOPWATCH_VIDEO_SPEED_MB', 30))
 
 # —— Flask session cookie 验证 ——
 _session_serializer = URLSafeTimedSerializer(
@@ -82,30 +81,13 @@ def _is_video(filepath: str) -> bool:
     return os.path.splitext(filepath)[1].lower() in config.VIDEO_EXT
 
 
-def _client_label(request: Request) -> str:
-    ua = request.headers.get('user-agent', '').lower()
-    if not ua:
-        return '?'
-    if 'android' in ua:
-        return 'Android'
-    if 'iphone' in ua or 'ipad' in ua:
-        return 'iOS'
-    if 'windows' in ua:
-        return 'Win'
-    if 'mac os' in ua or 'macintosh' in ua:
-        return 'Mac'
-    if 'linux' in ua:
-        return 'Linux'
-    return '?'
-
-
 async def _video_chunk_generator(filepath: str, start: int, end: int,
                                  request: Request, logger: logging.Logger):
     """
-    令牌桶调速的异步视频块生成器。
+    恒速异步视频块生成器。
 
-    用令牌桶将发送速率平滑控制在 TARGET_SPEED_MB 附近，
-    同时允许 BURST_MB 的突发（浏览器初始缓冲阶段全速发送）。
+    每个 chunk 发送后计算实际耗时，若快于目标速率则 sleep 补齐。
+    不使用突发——从头到尾维持恒定速率，避免 TCP 拥塞崩溃。
     检测客户端断开即停。
     """
     remaining = end - start + 1
@@ -113,50 +95,41 @@ async def _video_chunk_generator(filepath: str, start: int, end: int,
     chunk_count = 0
     t_start = time.monotonic()
 
-    # 令牌桶状态
-    token_rate = TARGET_SPEED_MB * 1024 * 1024  # bytes/s
-    max_tokens = BURST_MB * 1024 * 1024  # burst budget in bytes
-    tokens = max_tokens  # 初始满桶，允许浏览器快速填满播放缓冲
-    last_refill = t_start
+    target_chunk_time = VIDEO_CHUNK / (TARGET_SPEED_MB * 1024 * 1024)
 
     with open(filepath, 'rb') as fh:
         fh.seek(start)
         while remaining > 0:
+            chunk_size = min(VIDEO_CHUNK, remaining)
+            t_chunk_start = time.monotonic()
+
+            data = fh.read(chunk_size)
+            if not data:
+                break
+
+            remaining -= len(data)
+            chunk_count += 1
+            yield data
+
+            # 检查客户端断开
             if await request.is_disconnected():
                 elapsed = time.monotonic() - t_start
                 sent_bytes = total_bytes - remaining
                 speed = (sent_bytes / 1024 / 1024 / elapsed) if elapsed > 0 else 0
                 logger.warning(
-                    f"[断连] {_client_label(request)} | {os.path.basename(filepath)} | "
+                    f"[断连] {os.path.basename(filepath)} | "
                     f"已发 {sent_bytes/1024/1024:.0f}/{total_bytes/1024/1024:.0f}MB | "
                     f"均速 {speed:.1f}MB/s"
                 )
                 return
 
-            # ── 令牌桶：等待足够 token 再发送 ──
-            chunk_size = min(VIDEO_CHUNK, remaining)
-            while tokens < chunk_size:
-                await asyncio.sleep(0.02)
-                now = time.monotonic()
-                tokens = min(max_tokens, tokens + (now - last_refill) * token_rate)
-                last_refill = now
-                if await request.is_disconnected():
-                    return
+            # 恒速控制：实际耗时短于目标则补齐
+            elapsed = time.monotonic() - t_chunk_start
+            sleep_time = target_chunk_time - elapsed
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
 
-            # 补充 token（基于实际经过的时间）
-            now = time.monotonic()
-            tokens = min(max_tokens, tokens + (now - last_refill) * token_rate)
-            last_refill = now
-
-            data = fh.read(chunk_size)
-            if not data:
-                break
-            tokens -= len(data)
-            remaining -= len(data)
-            chunk_count += 1
-            yield data
-
-    # 正常完成：只在超过 50MB 的大传输时记一条 INFO
+    # 大文件传输完成（>50MB）才记录
     elapsed = time.monotonic() - t_start
     if total_bytes > 50 * 1024 * 1024:
         speed = (total_bytes / 1024 / 1024 / elapsed) if elapsed > 0 else 0
@@ -169,7 +142,7 @@ async def _video_chunk_generator(filepath: str, start: int, end: int,
 
 @video_app.get("/media/serve_media/{file_path:path}")
 async def serve_video(file_path: str, request: Request):
-    """视频流式传输 — 令牌桶调速 + Range 支持 + 断连保护"""
+    """视频流式传输 — 恒速 + Range 支持 + 断连保护"""
     if not _check_login(request):
         return Response(status_code=403)
 
