@@ -10,97 +10,162 @@
 
 <div class="app">
 
-    <!-- 标签栏 -->
-    <div class="tab-bar">
-        <div class="tab-buttons">
-            <button class="tab-btn active" data-tab="console">控制台</button>
-            <button class="tab-btn" data-tab="logs">日志</button>
+    <!-- 顶栏 -->
+    <header class="header">
+        <div class="header-left">
+            <span class="logo">LaptopWatch</span>
+            <nav class="tab-nav">
+                <button class="tab-btn active" data-tab="console">控制台</button>
+                <button class="tab-btn" data-tab="logs">日志</button>
+            </nav>
         </div>
         <div class="status-badge">
             <span class="status-dot" id="statusDot"></span>
             <span id="statusText">未运行</span>
         </div>
-    </div>
-    <div class="tab-sep"></div>
+    </header>
 
     <!-- 控制台 -->
     <div class="tab-content active" id="tabConsole">
         <div class="scroll-wrap">
             <div class="scroll-inner">
 
-                <!-- 运行模式 -->
-                <div class="card">
-                    <div class="card-title">运行模式</div>
-                    <div class="segmented">
-                        <button class="seg-btn active" data-mode="normal">普通</button>
-                        <button class="seg-btn" data-mode="video">视频</button>
-                        <button class="seg-btn" data-mode="image">图片</button>
-                        <button class="seg-btn" data-mode="douyin">抖音</button>
+                <!-- 运行模式：卡片选择器 -->
+                <section class="section">
+                    <h3 class="section-title">运行模式</h3>
+                    <div class="mode-cards">
+                        <button class="seg-btn active" data-mode="normal">
+                            <span class="mode-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                            </span>
+                            <span class="mode-label">普通</span>
+                            <span class="mode-desc">浏览模式</span>
+                        </button>
+                        <button class="seg-btn" data-mode="video">
+                            <span class="mode-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            </span>
+                            <span class="mode-label">视频</span>
+                            <span class="mode-desc">视频播放</span>
+                        </button>
+                        <button class="seg-btn" data-mode="image">
+                            <span class="mode-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                            </span>
+                            <span class="mode-label">图片</span>
+                            <span class="mode-desc">图片轮播</span>
+                        </button>
+                        <button class="seg-btn" data-mode="douyin">
+                            <span class="mode-icon">
+                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="7" x2="17" y2="17"/><circle cx="12" cy="12" r="4"/></svg>
+                            </span>
+                            <span class="mode-label">抖音</span>
+                            <span class="mode-desc">抖音风格</span>
+                        </button>
                     </div>
+                </section>
+
+                <!-- 媒体目录 -->
+                <section class="section" id="sectionMediaDir">
+                    <h3 class="section-title">媒体目录</h3>
+                    <div class="dir-picker">
+                        <input type="text" id="mediaDir" class="dir-input"
+                               placeholder="选择包含视频或图片的文件夹..." readonly disabled>
+                        <button class="btn btn-secondary" id="browseBtn" disabled>选择文件夹</button>
+                    </div>
+                </section>
+
+                <!-- 配置双栏 -->
+                <div class="row-2col">
+                    <!-- 排序 -->
+                    <section class="section">
+                        <h3 class="section-title">排序规则</h3>
+                        <div class="sort-row">
+                            <select id="sortType" disabled>
+                                <option value="name">按名称</option>
+                                <option value="time">按时间</option>
+                            </select>
+                            <select id="sortOrder" disabled>
+                                <option value="asc">升序</option>
+                                <option value="desc">降序</option>
+                            </select>
+                        </div>
+                    </section>
+
+                    <!-- 播放设置 -->
+                    <section class="section">
+                        <h3 class="section-title">播放设置</h3>
+                        <div class="option-list">
+                            <label class="option-item">
+                                <input type="checkbox" id="randomMode" disabled>
+                                <span class="option-text">
+                                    <span class="option-label">随机位置</span>
+                                    <span class="option-hint">随机起始播放位置</span>
+                                </span>
+                            </label>
+                            <label class="option-item" id="optionDouyinRandom">
+                                <input type="checkbox" id="douyinRandom" disabled>
+                                <span class="option-text">
+                                    <span class="option-label">随机媒体</span>
+                                    <span class="option-hint">抖音模式下随机切换媒体</span>
+                                </span>
+                            </label>
+                            <label class="option-item">
+                                <input type="checkbox" id="categoryBrowse" disabled>
+                                <span class="option-text">
+                                    <span class="option-label">目录浏览</span>
+                                    <span class="option-hint">按目录结构浏览</span>
+                                </span>
+                            </label>
+                        </div>
+                    </section>
                 </div>
 
-                <!-- 第一行：媒体配置 | 服务控制 -->
+                <!-- 服务控制 + 访问入口 -->
                 <div class="row-2col">
-                    <div class="card">
-                        <div class="card-title">媒体配置</div>
-                        <div class="form-group">
-                            <label>媒体目录</label>
-                            <div class="input-row">
-                                <input type="text" id="mediaDir" placeholder="选择包含视频或图片的文件夹..." disabled>
-                                <button class="btn btn-secondary" id="browseBtn" disabled>浏览</button>
+                    <section class="section">
+                        <h3 class="section-title">服务控制</h3>
+                        <div class="action-stack">
+                            <button class="btn btn-success btn-lg btn-full" id="startBtn">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                启动服务
+                            </button>
+                            <button class="btn btn-danger btn-lg btn-full" id="stopBtn" disabled>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                                停止服务
+                            </button>
+                        </div>
+                    </section>
+
+                    <section class="section">
+                        <h3 class="section-title">访问入口</h3>
+                        <div class="access-panel">
+                            <div class="qr-box" id="qrBox">
+                                <span class="qr-placeholder" id="qrPlaceholder">启动服务后<br>显示二维码</span>
+                                <img id="qrImage" style="display:none" alt="QR Code">
+                            </div>
+                            <div class="url-group">
+                                <div class="url-field">
+                                    <span class="url-label">局域网</span>
+                                    <input type="text" class="url-input" id="urlDisplay" value="—" readonly>
+                                </div>
+                                <button class="btn btn-secondary btn-full" id="openBrowserBtn" disabled>在浏览器中打开</button>
                             </div>
                         </div>
-                        <div class="form-group">
-                            <label>排序规则</label>
-                            <div class="input-row">
-                                <select id="sortType" disabled>
-                                    <option value="name">按名称</option>
-                                    <option value="time">按时间</option>
-                                </select>
-                                <select id="sortOrder" disabled>
-                                    <option value="asc">升序</option>
-                                    <option value="desc">降序</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="checkbox-row">
-                            <label><input type="checkbox" id="randomMode" disabled><span>随机位置</span></label>
-                            <label><input type="checkbox" id="douyinRandom" disabled><span>随机媒体</span></label>
-                            <label><input type="checkbox" id="categoryBrowse" disabled><span>目录浏览</span></label>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-title">服务控制</div>
-                        <div class="center-stack">
-                            <button class="btn btn-success btn-full" id="startBtn">启动服务</button>
-                            <button class="btn btn-danger btn-full" id="stopBtn" disabled>停止服务</button>
-                        </div>
-                    </div>
+                    </section>
                 </div>
 
-                <!-- 第二行：管理台 | 访问信息 -->
-                <div class="row-2col">
-                    <div class="card">
-                        <div class="card-title">管理台</div>
-                        <div class="qid-status" id="qidStatus">未启动</div>
-                        <div class="btn-row-3">
-                            <button class="btn btn-primary" id="qidStartBtn">启动</button>
-                            <button class="btn btn-secondary" id="qidStopBtn" disabled>停止</button>
-                            <button class="btn btn-secondary" id="qidOpenBtn" disabled>打开</button>
-                        </div>
+                <!-- 管理台 -->
+                <section class="section">
+                    <h3 class="section-title">管理台
+                        <span class="qid-status-inline" id="qidStatus">未启动</span>
+                    </h3>
+                    <div class="btn-row-3">
+                        <button class="btn btn-primary" id="qidStartBtn">启动</button>
+                        <button class="btn btn-secondary" id="qidStopBtn" disabled>停止</button>
+                        <button class="btn btn-secondary" id="qidOpenBtn" disabled>打开</button>
                     </div>
-
-                    <div class="card">
-                        <div class="card-title">访问信息</div>
-                        <div class="qr-box" id="qrBox">
-                            <span class="qr-placeholder" id="qrPlaceholder">启动服务后<br>显示二维码</span>
-                            <img id="qrImage" style="display:none;width:100px;height:100px;" alt="QR Code">
-                        </div>
-                        <input type="text" class="url-input" id="urlDisplay" value="—" readonly>
-                        <button class="btn btn-secondary btn-full" id="openBrowserBtn" disabled>在浏览器中打开</button>
-                    </div>
-                </div>
+                </section>
 
             </div>
         </div>
@@ -114,10 +179,10 @@
     </div>
 
     <!-- 底部状态栏 -->
-    <div class="footer-bar">
+    <footer class="footer-bar">
         <span id="footerStatus">就绪</span>
         <span id="footerRuntime"></span>
-    </div>
+    </footer>
 
 </div>
 
