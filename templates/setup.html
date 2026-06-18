@@ -12,16 +12,17 @@
 
     <!-- 顶栏 -->
     <header class="header">
-        <div class="header-left">
-            <span class="logo">LaptopWatch</span>
+        <span class="logo">LaptopWatch</span>
+        <div class="header-right">
             <nav class="tab-nav">
                 <button class="tab-btn active" data-tab="console">控制台</button>
                 <button class="tab-btn" data-tab="logs">日志</button>
+                <button class="tab-btn" data-tab="advanced">高级设置</button>
             </nav>
-        </div>
-        <div class="status-badge">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusText">未运行</span>
+            <div class="status-badge">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">未运行</span>
+            </div>
         </div>
     </header>
 
@@ -30,140 +31,112 @@
         <div class="scroll-wrap">
             <div class="scroll-inner">
 
-                <!-- 运行模式：卡片选择器 -->
-                <section class="section">
-                    <h3 class="section-title">运行模式</h3>
-                    <div class="mode-cards">
-                        <button class="seg-btn active" data-mode="normal">
-                            <span class="mode-icon">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-                            </span>
-                            <span class="mode-label">普通</span>
-                            <span class="mode-desc">浏览模式</span>
-                        </button>
-                        <button class="seg-btn" data-mode="video">
-                            <span class="mode-icon">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                            </span>
-                            <span class="mode-label">视频</span>
-                            <span class="mode-desc">视频播放</span>
-                        </button>
-                        <button class="seg-btn" data-mode="image">
-                            <span class="mode-icon">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                            </span>
-                            <span class="mode-label">图片</span>
-                            <span class="mode-desc">图片轮播</span>
-                        </button>
-                        <button class="seg-btn" data-mode="douyin">
-                            <span class="mode-icon">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="7" x2="17" y2="17"/><circle cx="12" cy="12" r="4"/></svg>
-                            </span>
-                            <span class="mode-label">抖音</span>
-                            <span class="mode-desc">抖音风格</span>
-                        </button>
-                    </div>
-                </section>
+                <!-- 运行模式 -->
+                <div class="mode-grid">
+                    <button class="mode-card active" data-mode="normal">
+                        <div class="mode-card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                        </div>
+                        <span class="mode-card-label">普通</span>
+                    </button>
+                    <button class="mode-card" data-mode="video">
+                        <div class="mode-card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        </div>
+                        <span class="mode-card-label">视频</span>
+                    </button>
+                    <button class="mode-card" data-mode="image">
+                        <div class="mode-card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        </div>
+                        <span class="mode-card-label">图片</span>
+                    </button>
+                    <button class="mode-card" data-mode="douyin">
+                        <div class="mode-card-icon">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="3"/><line x1="7" y1="7" x2="17" y2="17"/><circle cx="12" cy="12" r="4"/></svg>
+                        </div>
+                        <span class="mode-card-label">抖音</span>
+                    </button>
+                </div>
 
-                <!-- 媒体目录 -->
-                <section class="section" id="sectionMediaDir">
-                    <h3 class="section-title">媒体目录</h3>
+                <!-- 媒体目录 — 独占一行 -->
+                <section class="card" id="sectionMediaDir">
                     <div class="dir-picker">
-                        <input type="text" id="mediaDir" class="dir-input"
+                        <input type="text" id="mediaDir" class="field-input"
                                placeholder="选择包含视频或图片的文件夹..." readonly disabled>
-                        <button class="btn btn-secondary" id="browseBtn" disabled>选择文件夹</button>
+                        <button class="btn btn-outline" id="browseBtn" disabled>选择文件夹</button>
                     </div>
                 </section>
 
-                <!-- 配置双栏 -->
+                <!-- 排序 + 播放设置 -->
                 <div class="row-2col">
-                    <!-- 排序 -->
-                    <section class="section">
-                        <h3 class="section-title">排序规则</h3>
+                    <section class="card">
+                        <h3 class="card-title">排序规则</h3>
                         <div class="sort-row">
-                            <select id="sortType" disabled>
+                            <select id="sortType" class="field-input" disabled>
                                 <option value="name">按名称</option>
                                 <option value="time">按时间</option>
                             </select>
-                            <select id="sortOrder" disabled>
+                            <select id="sortOrder" class="field-input" disabled>
                                 <option value="asc">升序</option>
                                 <option value="desc">降序</option>
                             </select>
                         </div>
                     </section>
 
-                    <!-- 播放设置 -->
-                    <section class="section">
-                        <h3 class="section-title">播放设置</h3>
-                        <div class="option-list">
-                            <label class="option-item">
+                    <section class="card">
+                        <h3 class="card-title">播放设置</h3>
+                        <div class="toggle-list">
+                            <label class="toggle-item">
                                 <input type="checkbox" id="randomMode" disabled>
-                                <span class="option-text">
-                                    <span class="option-label">随机位置</span>
-                                    <span class="option-hint">随机起始播放位置</span>
-                                </span>
+                                <span class="toggle-label">随机起始位置</span>
                             </label>
-                            <label class="option-item" id="optionDouyinRandom">
+                            <label class="toggle-item" id="optionDouyinRandom">
                                 <input type="checkbox" id="douyinRandom" disabled>
-                                <span class="option-text">
-                                    <span class="option-label">随机媒体</span>
-                                    <span class="option-hint">抖音模式下随机切换媒体</span>
-                                </span>
+                                <span class="toggle-label">抖音随机切换</span>
                             </label>
-                            <label class="option-item">
+                            <label class="toggle-item">
                                 <input type="checkbox" id="categoryBrowse" disabled>
-                                <span class="option-text">
-                                    <span class="option-label">目录浏览</span>
-                                    <span class="option-hint">按目录结构浏览</span>
-                                </span>
+                                <span class="toggle-label">按目录浏览</span>
                             </label>
                         </div>
                     </section>
                 </div>
 
-                <!-- 服务控制 + 访问入口 -->
-                <div class="row-2col">
-                    <section class="section">
-                        <h3 class="section-title">服务控制</h3>
-                        <div class="action-stack">
-                            <button class="btn btn-success btn-lg btn-full" id="startBtn">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                                启动服务
-                            </button>
-                            <button class="btn btn-danger btn-lg btn-full" id="stopBtn" disabled>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                                停止服务
+                <!-- 服务控制 -->
+                <section class="card card-service">
+                    <div class="service-layout">
+                        <button class="btn btn-start btn-lg" id="actionBtn">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            <span>启动服务</span>
+                        </button>
+                        <div class="service-divider"></div>
+                        <div class="qr-box" id="qrBox">
+                            <span class="qr-placeholder" id="qrPlaceholder">启动后显示二维码</span>
+                            <img id="qrImage" style="display:none" alt="QR Code">
+                        </div>
+                        <div class="service-url-group">
+                            <input type="text" class="field-input mono" id="urlDisplay" value="—" readonly>
+                            <button class="btn btn-outline" id="openBrowserBtn" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                打开
                             </button>
                         </div>
-                    </section>
-
-                    <section class="section">
-                        <h3 class="section-title">访问入口</h3>
-                        <div class="access-panel">
-                            <div class="qr-box" id="qrBox">
-                                <span class="qr-placeholder" id="qrPlaceholder">启动服务后<br>显示二维码</span>
-                                <img id="qrImage" style="display:none" alt="QR Code">
-                            </div>
-                            <div class="url-group">
-                                <div class="url-field">
-                                    <span class="url-label">局域网</span>
-                                    <input type="text" class="url-input" id="urlDisplay" value="—" readonly>
-                                </div>
-                                <button class="btn btn-secondary btn-full" id="openBrowserBtn" disabled>在浏览器中打开</button>
-                            </div>
-                        </div>
-                    </section>
-                </div>
+                    </div>
+                </section>
 
                 <!-- 管理台 -->
-                <section class="section">
-                    <h3 class="section-title">管理台
-                        <span class="qid-status-inline" id="qidStatus">未启动</span>
-                    </h3>
-                    <div class="btn-row-3">
-                        <button class="btn btn-primary" id="qidStartBtn">启动</button>
-                        <button class="btn btn-secondary" id="qidStopBtn" disabled>停止</button>
-                        <button class="btn btn-secondary" id="qidOpenBtn" disabled>打开</button>
+                <section class="card">
+                    <div class="qid-header">
+                        <h3 class="card-title" style="margin-bottom:0">管理控制台</h3>
+                        <span class="qid-badge" id="qidStatus">未启动</span>
+                    </div>
+                    <div class="qid-row">
+                        <button class="btn btn-outline" id="qidActionBtn">启动管理台</button>
+                        <button class="btn btn-outline" id="qidOpenBtn" disabled>打开面板</button>
+                        <div class="qid-url-wrap" id="qidUrlField" style="display:none">
+                            <input type="text" class="field-input mono" id="qidUrlDisplay" value="" readonly>
+                        </div>
                     </div>
                 </section>
 
@@ -173,8 +146,53 @@
 
     <!-- 日志 -->
     <div class="tab-content" id="tabLogs">
-        <div class="log-viewer" id="logViewer">
-            <div class="log-line dim">等待启动...</div>
+        <div class="scroll-wrap">
+            <div class="scroll-inner" style="flex:1">
+                <div class="log-viewer" id="logViewer">
+                    <div class="log-line dim">等待启动...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 高级设置 -->
+    <div class="tab-content" id="tabAdvanced">
+        <div class="scroll-wrap">
+            <div class="scroll-inner">
+                <section class="card">
+                    <h3 class="card-title">安全设置</h3>
+                    <p class="card-desc">修改登录密码。密码使用 SHA-256 + 随机盐哈希存储，不会保存明文。</p>
+                    <button class="btn btn-outline" id="changePasswordBtn" style="margin-top:10px">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                        修改密码
+                    </button>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- 密码修改弹窗 -->
+    <div class="modal-overlay" id="passwordModal" style="display:none">
+        <div class="modal-card">
+            <h3 class="modal-title">修改密码</h3>
+            <form id="passwordForm">
+                <div class="input-group">
+                    <input type="password" class="text-input" id="newPassword" placeholder=" " required maxlength="64">
+                    <label class="input-label">新密码</label>
+                    <div class="char-hint">仅限数字、英文字母及 @ . _ - ! # $ % &amp; * +</div>
+                    <div class="error-tip" id="pwdCharError" style="display:none">密码包含不允许的字符</div>
+                </div>
+                <div class="input-group">
+                    <input type="password" class="text-input" id="confirmPassword" placeholder=" " required maxlength="64">
+                    <label class="input-label">确认密码</label>
+                    <div class="error-tip" id="confirmError" style="display:none">两次输入的密码不一致</div>
+                </div>
+                <div class="error-tip" id="modalError" style="display:none;text-align:center"></div>
+                <div class="btn-row">
+                    <button type="submit" class="btn btn-start btn-full">保存</button>
+                    <button type="button" class="btn btn-outline" id="cancelPasswordBtn">取消</button>
+                </div>
+            </form>
         </div>
     </div>
 

@@ -5,6 +5,7 @@
 import os
 import re
 import time
+import socket
 import urllib.parse
 from flask import Blueprint, request, jsonify, send_from_directory, session, render_template, Response
 from config import config
@@ -25,9 +26,9 @@ class _BigFileWrapper(_OrigFileWrapper):
 import werkzeug.wsgi
 werkzeug.wsgi.FileWrapper = _BigFileWrapper
 
-# ── 视频流 burst-first 策略：拖拽进度条时首块大 burst 快速填满浏览器解码缓冲 ──
-VIDEO_BURST = 4 * 1024 * 1024     # seek 时首块 4MB burst
-VIDEO_CHUNK = 1024 * 1024         # 稳态 1MB 分块
+# ── 视频流传输参数 ──
+VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 0.5 * 1024 * 1024))  # 512KB
+SEND_TIMEOUT = 5  # socket 发送超时秒数，超时即客户端停止接收
 
 
 # 随机模式 ID 缓存：{ (seed, media_type): (shuffled_ids, count) }
@@ -138,7 +139,7 @@ def _db_thumbnail(target_path):
         logger.error(f"DB thumbnail 失败: {e}")
         return False, None, None
 
-@media_bp.route('/load_more')
+@media_bp.route('/load_more', methods=['GET'])
 @login_required
 @require_mode('video', 'image', 'douyin')
 def load_more():
@@ -163,7 +164,7 @@ def load_more():
     finally:
         log_access(request, 'LOAD_MORE', f'offset={locals().get("offset", 0)}', duration=time.time() - start_time)
 
-@media_bp.route('/thumbnail/<path:relative_path>')
+@media_bp.route('/thumbnail/<path:relative_path>', methods=['GET'])
 @login_required
 @require_mode('video', 'image', 'douyin')
 def api_thumbnail(relative_path):
@@ -217,7 +218,7 @@ def api_thumbnail(relative_path):
         }
     return '', 404
 
-@media_bp.route('/serve_media/')
+@media_bp.route('/serve_media/', methods=['GET'])
 @login_required
 @require_mode('video', 'image', 'douyin')
 def serve_media_empty():
@@ -227,65 +228,53 @@ def serve_media_empty():
 
 
 def _parse_range(range_header, file_size):
-    """解析 HTTP Range 头，返回 (start, end, is_seek) 或 None 表示非法范围。
-
-    Range 头格式 (RFC 7233):
-        bytes=<first>-<last>    — 指定起止偏移
-        bytes=<first>-          — 从 first 到文件末尾
-
-    示例:
-        "bytes=0-"         → (0, file_size-1, False)   首次加载
-        "bytes=524288000-" → (524288000, ..., True)    拖拽到 500MB 处
-    """
+    """解析 HTTP Range 头，返回 (start, end) 或 None 表示非法范围"""
     if not range_header:
-        return 0, file_size - 1, False
-
+        return 0, file_size - 1
     match = re.match(r'bytes=(\d+)-(\d*)$', range_header)
     if not match:
-        return 0, file_size - 1, False
-
+        return 0, file_size - 1
     start = int(match.group(1))
     end_str = match.group(2)
     end = int(end_str) if end_str else file_size - 1
-
     if start >= file_size:
         return None
     if end >= file_size:
         end = file_size - 1
+    return start, end
 
-    return start, end, (start > 0)
 
-
-def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
-    """视频流式传输，burst-first 策略优化拖拽体验。
-
-    seek 时首块发 4MB，确保覆盖到 I 帧，浏览器无需等第二个 chunk 即可解码。
-    """
+def _stream_video_file(filepath, range_header, mimetype, environ):
+    """视频流式传输 — 512KB 匀速分块 + socket 超时保护"""
     file_size = os.path.getsize(filepath)
 
     parsed = _parse_range(range_header, file_size)
     if parsed is None:
         return Response('', status=416,
                         headers={'Content-Range': f'bytes */{file_size}'})
-    start, end, is_seek = parsed
+    start, end = parsed
 
     content_length = end - start + 1
-    has_range = bool(range_header and re.match(r'bytes=(\d+)-(\d*)$', range_header))
+    has_range = bool(range_header and range_header.startswith('bytes='))
+    wsock = environ.get('werkzeug.socket') if environ else None
+
+    if wsock:
+        wsock.settimeout(SEND_TIMEOUT)
 
     def generate():
         remaining = content_length
         with open(filepath, 'rb') as fh:
             fh.seek(start)
-            if is_seek and remaining > VIDEO_BURST:
-                data = fh.read(VIDEO_BURST)
-                remaining -= len(data)
-                yield data
             while remaining > 0:
-                chunk = fh.read(min(VIDEO_CHUNK, remaining))
-                if not chunk:
+                chunk_size = min(VIDEO_CHUNK, remaining)
+                data = fh.read(chunk_size)
+                if not data:
                     break
-                remaining -= len(chunk)
-                yield chunk
+                remaining -= len(data)
+                try:
+                    yield data
+                except (socket.timeout, TimeoutError, OSError):
+                    break
 
     headers = {
         'Accept-Ranges': 'bytes',
@@ -299,7 +288,7 @@ def _stream_video_file(filepath, range_header, mimetype='video/mp4'):
                     headers=headers, direct_passthrough=True)
 
 
-@media_bp.route('/serve_media/<path:relative_path>')
+@media_bp.route('/serve_media/<path:relative_path>', methods=['GET'])
 @login_required
 @require_mode('video', 'image', 'douyin')
 def serve_media(relative_path):
@@ -341,7 +330,7 @@ def serve_media(relative_path):
         if is_video:
             # 视频：自定义 burst-first Range 处理器，优化拖拽体验
             range_header = request.headers.get('Range', '')
-            return _stream_video_file(str(target), range_header, mime_type)
+            return _stream_video_file(str(target), range_header, mime_type, request.environ)
         else:
             # 图片：标准 send_file，文件小无需特殊优化
             directory = target.parent
@@ -354,7 +343,7 @@ def serve_media(relative_path):
         log_exception(request, 'MEDIA_ACCESS_ERROR', relative_path, e)
         return f'访问错误: {str(e)}', 500
 
-@media_bp.route('/download_media/<path:relative_path>')
+@media_bp.route('/download_media/<path:relative_path>', methods=['GET'])
 @login_required
 @require_mode('video', 'image', 'douyin')
 def download_media(relative_path):
@@ -391,7 +380,7 @@ def download_media(relative_path):
                    locals().get('decoded_relative_path', relative_path).replace('\\', '/'),
                    duration=time.time() - start_time)
 
-@media_bp.route('/navigate')
+@media_bp.route('/navigate', methods=['GET'])
 @login_required
 @require_mode('video', 'image', 'douyin')
 def api_media_navigate():
@@ -445,7 +434,7 @@ def api_media_navigate():
         log_access(request, 'MEDIA_NAV', locals().get('current_path', ''), locals().get('direction', ''), duration=time.time() - start_time)
 
 
-@media_bp.route('/player')
+@media_bp.route('/player', methods=['GET'])
 @login_required
 @require_mode('video', 'image')
 def media_player():

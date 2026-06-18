@@ -13,7 +13,7 @@ from blueprints.auth import login_required, require_mode
 
 normal_bp = Blueprint('normal_api', __name__, url_prefix='/api')
 
-@normal_bp.route('/check_path')
+@normal_bp.route('/check_path', methods=['GET'])
 @login_required
 @require_mode('normal')
 def api_check_path():
@@ -113,7 +113,7 @@ def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_typ
             conn.close()
 
 
-@normal_bp.route('/list')
+@normal_bp.route('/list', methods=['GET'])
 @login_required
 @require_mode('normal')
 def api_list():
@@ -221,7 +221,7 @@ def api_list():
     finally:
         log_access(request, 'API_LIST', locals().get('path', ''), f'type={locals().get("typ", "")} offset={locals().get("offset", 0)}', duration=time.time() - start_time)
 
-@normal_bp.route('/list_all')
+@normal_bp.route('/list_all', methods=['GET'])
 @login_required
 @require_mode('normal')
 def api_list_all():

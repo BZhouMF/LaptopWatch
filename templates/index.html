@@ -1,30 +1,126 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>局域网文件管理器</title>
+    <title>LaptopWatch</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .index-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            background: var(--background);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .index-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .index-logo {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.3px;
+        }
+        .index-mode-badge {
+            font-size: 11px;
+            font-weight: 500;
+            padding: 3px 10px;
+            border-radius: 10px;
+            background: rgba(108, 140, 255, 0.08);
+            color: var(--primary-color);
+            border: 1px solid rgba(108, 140, 255, 0.2);
+        }
+        .index-drive-count {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .index-content {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .drive-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        /* Override card hover for drive cards */
+        .drive-card {
+            min-height: 140px;
+        }
+        .drive-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: rgba(108, 140, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+        .drive-letter {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        .drive-name {
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .drive-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        @media (max-width: 640px) {
+            .index-content {
+                padding: 12px;
+            }
+            .drive-grid {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+                gap: 8px;
+            }
+            .index-header {
+                padding: 8px 14px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <div class="index-header">
-        <h1>我的电脑</h1>
-        <p class="index-subtitle">共 {{ drives|length }} 个磁盘分区</p>
+    <header class="index-header">
+        <div class="index-header-left">
+            <span class="index-logo">LaptopWatch</span>
+            <span class="index-mode-badge">普通模式</span>
+        </div>
+        <span class="index-drive-count">{{ drives|length }} 个磁盘</span>
+    </header>
+
+    <div class="index-content">
+        <div class="drive-grid">
+            {% for drive in drives %}
+            <a href="{{ ROUTES.browse }}{{ drive }}:/" class="card drive-card">
+                <div class="drive-icon">
+                    <span class="drive-letter">{{ drive }}</span>
+                </div>
+                <div class="drive-name">{{ drive }} 盘</div>
+                <div class="drive-label">本地磁盘</div>
+            </a>
+            {% endfor %}
+        </div>
     </div>
-    <div class="grid">
-        {% for drive in drives %}
-        <a href="{{ ROUTES.browse }}{{ drive }}:/" class="card drive-card">
-            <div class="drive-icon">
-                <span class="drive-letter">{{ drive }}</span>
-            </div>
-            <div class="name">{{ drive }} 盘</div>
-            <div class="drive-label">本地磁盘</div>
-        </a>
-        {% endfor %}
-    </div>
+
     <script src="{{ url_for('static', filename='js/script.js') }}"></script>
     <script>
-        // 首页也加入历史记录
         let historyStack = JSON.parse(localStorage.getItem('fileHistory') || '[]');
         const currentPath = '/';
         if (historyStack[historyStack.length-1] !== currentPath) {
@@ -32,7 +128,6 @@
             if (historyStack.length > {{ MAX_HISTORY_LENGTH }}) historyStack.shift();
             localStorage.setItem('fileHistory', JSON.stringify(historyStack));
         }
-        // 初始化默认设置
         if (!localStorage.getItem('currentView')) localStorage.setItem('currentView', 'large');
         if (!localStorage.getItem('currentSort')) localStorage.setItem('currentSort', 'name');
         if (!localStorage.getItem('currentOrder')) localStorage.setItem('currentOrder', 'asc');

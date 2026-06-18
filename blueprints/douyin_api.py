@@ -63,7 +63,7 @@ def _pick_random_video(exclude_paths):
         return None
 
 
-@douyin_bp.route('/init')
+@douyin_bp.route('/init', methods=['GET'])
 @login_required
 @require_mode('douyin')
 def douyin_init():
@@ -84,7 +84,7 @@ def douyin_init():
         log_access(request, 'DOUYIN_INIT', '', duration=time.time() - start_time)
 
 
-@douyin_bp.route('/next')
+@douyin_bp.route('/next', methods=['GET'])
 @login_required
 @require_mode('douyin')
 def douyin_next():

@@ -42,12 +42,9 @@ function updatePagination() {
 
     var pagesHtml = '';
     var maxVisible = 5;
-    var startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-    var endPage = Math.min(totalPages, startPage + maxVisible - 1);
-
-    if (endPage - startPage + 1 < maxVisible) {
-        startPage = Math.max(1, endPage - maxVisible + 1);
-    }
+    var half = Math.floor(maxVisible / 2);
+    var startPage = Math.max(1, currentPage - half);
+    var endPage = Math.min(totalPages, currentPage + half);
 
     if (startPage > 1) {
         pagesHtml += '<span class="page-dots">...</span>';
@@ -65,9 +62,7 @@ function updatePagination() {
         }
     }
 
-    if (isTraversalMode && hasMore && endPage === totalPages) {
-        pagesHtml += '<span class="page-dots">...</span>';
-    } else if (endPage < totalPages) {
+    if (endPage < totalPages || (isTraversalMode && hasMore)) {
         pagesHtml += '<span class="page-dots">...</span>';
     }
 
@@ -178,7 +173,7 @@ function renderPage(items, page, more, total, newOffset) {
         card.className = 'video-card';
         card.onclick = function() { openMedia(item.relative_path); };
         var thumbHtml = (item.is_video || item.is_image)
-            ? '<img src="' + window.ROUTES.mediaThumbnail + encodeURIComponent(item.relative_path) + '" alt="' + item.name + '" loading="lazy">'
+            ? '<img src="' + window.ROUTES.mediaThumbnail + encodeURIComponent(item.relative_path) + '" alt="' + item.name + '" loading="lazy">' + (item.is_video ? '<div class="play-overlay"></div>' : '')
             : '<div class="thumb-placeholder">' + (item.is_video ? 'VID' : 'IMG') + '</div>';
         card.innerHTML = '<div class="video-thumb">' + thumbHtml + '</div><div class="video-info"><div class="video-name" title="' + item.name + '">' + item.name + '</div></div>';
         grid.appendChild(card);

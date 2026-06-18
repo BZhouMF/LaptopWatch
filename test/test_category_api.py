@@ -25,10 +25,20 @@ def _create_file(path, content='test'):
 
 
 @pytest.fixture
-def app(temp_dir):
-    """Flask 应用，video 模式 + 测试媒体目录"""
+def db_path():
+    """独立 DB 路径，避免文件锁定影响 temp_dir 清理"""
+    _dir = tempfile.mkdtemp()
+    yield os.path.join(_dir, 'test.db')
+    import shutil
+    shutil.rmtree(_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def app(temp_dir, db_path):
+    """Flask 应用，video 模式 + 隔离的测试数据库"""
     config.RUN_MODE = 'video'
     config.MEDIA_DIR = Path(temp_dir)
+    config.DB_PATH = db_path
 
     from flask import Flask
     app = Flask(__name__)
@@ -38,7 +48,8 @@ def app(temp_dir):
     from blueprints.category_api import category_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(category_bp)
-    return app
+    yield app
+    config.DB_PATH = None
 
 
 @pytest.fixture

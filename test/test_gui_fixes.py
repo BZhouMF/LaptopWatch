@@ -20,7 +20,7 @@ from unittest import mock
 
 import pytest
 
-import test_gui as tg
+import gui as tg
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -30,25 +30,25 @@ import test_gui as tg
 class TestParseArgs:
     def test_default_port(self):
         """默认端口为 5002"""
-        with mock.patch.object(sys, 'argv', ['test_gui.py']):
+        with mock.patch.object(sys, 'argv', ['gui.py']):
             args = tg.parse_args()
             assert args.port == 5002
 
     def test_custom_port(self):
         """--port 参数可自定义端口"""
-        with mock.patch.object(sys, 'argv', ['test_gui.py', '--port', '8080']):
+        with mock.patch.object(sys, 'argv', ['gui.py', '--port', '8080']):
             args = tg.parse_args()
             assert args.port == 8080
 
     def test_no_mode_arg(self):
         """--mode 参数已被移除，不应存在"""
-        with mock.patch.object(sys, 'argv', ['test_gui.py']):
+        with mock.patch.object(sys, 'argv', ['gui.py']):
             args = tg.parse_args()
             assert not hasattr(args, 'mode')
 
     def test_no_dir_arg(self):
         """--dir 参数已被移除，不应存在"""
-        with mock.patch.object(sys, 'argv', ['test_gui.py']):
+        with mock.patch.object(sys, 'argv', ['gui.py']):
             args = tg.parse_args()
             assert not hasattr(args, 'media_dir')
 
@@ -89,7 +89,7 @@ class TestSaveLogsOnce:
         log_messages = []
 
         with mock.patch.object(tg.config, 'SAVE_SESSION_LOGS', True), \
-             mock.patch('test_gui.save_session_logs') as mock_save:
+             mock.patch('gui.save_session_logs') as mock_save:
             tg._save_logs_once(lambda m: log_messages.append(m))
             assert mock_save.call_count == 1
             assert tg._session_logs_saved is True
@@ -100,7 +100,7 @@ class TestSaveLogsOnce:
     def test_skips_when_config_disabled(self):
         """config.SAVE_SESSION_LOGS=False 时不保存"""
         with mock.patch.object(tg.config, 'SAVE_SESSION_LOGS', False), \
-             mock.patch('test_gui.save_session_logs') as mock_save:
+             mock.patch('gui.save_session_logs') as mock_save:
             tg._save_logs_once(lambda m: None)
             assert mock_save.call_count == 0
             assert tg._session_logs_saved is False  # 未保存，标志不变
@@ -109,7 +109,7 @@ class TestSaveLogsOnce:
         """已经保存过的会话不再重复保存"""
         tg._session_logs_saved = True
         with mock.patch.object(tg.config, 'SAVE_SESSION_LOGS', True), \
-             mock.patch('test_gui.save_session_logs') as mock_save:
+             mock.patch('gui.save_session_logs') as mock_save:
             tg._save_logs_once(lambda m: None)
             assert mock_save.call_count == 0
 
@@ -331,12 +331,12 @@ class TestDesktopApi:
 
     def test_start_service_tracks_port(self):
         """启动服务后 _service_port 应更新为传入端口"""
-        with mock.patch('test_gui.check_port', return_value=[]), \
+        with mock.patch('gui.check_port', return_value=[]), \
              mock.patch.object(Path, 'exists', return_value=True), \
              mock.patch('subprocess.Popen') as mock_popen, \
-             mock.patch('test_gui.get_local_ip', return_value='192.168.1.5'), \
-             mock.patch('test_gui._generate_qr_base64', return_value='fakeqr'), \
-             mock.patch('test_gui._save_logs_once'):
+             mock.patch('gui.get_local_ip', return_value='192.168.1.5'), \
+             mock.patch('gui._generate_qr_base64', return_value='fakeqr'), \
+             mock.patch('gui._save_logs_once'):
             # 模拟进程仍在运行
             mock_proc = mock.MagicMock()
             mock_proc.poll.return_value = None
@@ -349,12 +349,12 @@ class TestDesktopApi:
     def test_start_service_default_port(self):
         """不传 port 时使用当前 _service_port（默认 5002）"""
         tg._service_port = 5002
-        with mock.patch('test_gui.check_port', return_value=[]), \
+        with mock.patch('gui.check_port', return_value=[]), \
              mock.patch.object(Path, 'exists', return_value=True), \
              mock.patch('subprocess.Popen') as mock_popen, \
-             mock.patch('test_gui.get_local_ip', return_value='192.168.1.5'), \
-             mock.patch('test_gui._generate_qr_base64', return_value='fakeqr'), \
-             mock.patch('test_gui._save_logs_once'):
+             mock.patch('gui.get_local_ip', return_value='192.168.1.5'), \
+             mock.patch('gui._generate_qr_base64', return_value='fakeqr'), \
+             mock.patch('gui._save_logs_once'):
             mock_proc = mock.MagicMock()
             mock_proc.poll.return_value = None
             mock_proc.stdout = []
@@ -378,15 +378,15 @@ class TestDesktopApi:
 
     def test_start_service_port_occupied(self):
         """端口被占用时返回错误"""
-        with mock.patch('test_gui.check_port', return_value=['12345']), \
-             mock.patch('test_gui.filter_alive_pids', return_value=['12345']):
+        with mock.patch('gui.check_port', return_value=['12345']), \
+             mock.patch('gui.filter_alive_pids', return_value=['12345']):
             result = self.api.start_service({'mode': 'normal', 'port': 5002})
             assert result['code'] == 1
             assert '被占用' in result['msg']
 
     def test_start_service_missing_app_py(self):
         """app.py 不存在时返回错误"""
-        with mock.patch('test_gui.check_port', return_value=[]), \
+        with mock.patch('gui.check_port', return_value=[]), \
              mock.patch.object(Path, 'exists', return_value=False):
             result = self.api.start_service({'mode': 'normal'})
             assert result['code'] == 1
@@ -403,9 +403,9 @@ class TestDesktopApi:
     def test_stop_service_uses_tracked_port(self):
         """stop_service 使用 _service_port 而非硬编码 5002"""
         tg._service_port = 8888
-        with mock.patch('test_gui.check_port') as mock_check, \
-             mock.patch('test_gui.filter_alive_pids', return_value=[]), \
-             mock.patch('test_gui._save_logs_once'):
+        with mock.patch('gui.check_port') as mock_check, \
+             mock.patch('gui.filter_alive_pids', return_value=[]), \
+             mock.patch('gui._save_logs_once'):
             mock_check.return_value = []
             result = self.api.stop_service()
             # check_port 被调用时使用 _service_port=8888
@@ -415,10 +415,10 @@ class TestDesktopApi:
 
     def test_start_service_exits_immediately(self):
         """子进程启动后立即退出应返回错误"""
-        with mock.patch('test_gui.check_port', return_value=[]), \
+        with mock.patch('gui.check_port', return_value=[]), \
              mock.patch.object(Path, 'exists', return_value=True), \
              mock.patch('subprocess.Popen') as mock_popen, \
-             mock.patch('test_gui._save_logs_once'):
+             mock.patch('gui._save_logs_once'):
             mock_proc = mock.MagicMock()
             mock_proc.poll.return_value = 1  # 返回码非 None → 进程已退出
             mock_proc.returncode = 1
@@ -455,8 +455,8 @@ class TestLogDedupInStopMethods:
 
     def test_stop_service_then_stop_qid_only_saves_once(self):
         """先停服务再停管理台，日志只保存一次"""
-        with mock.patch('test_gui.check_port', return_value=[]), \
-             mock.patch('test_gui.save_session_logs') as mock_save, \
+        with mock.patch('gui.check_port', return_value=[]), \
+             mock.patch('gui.save_session_logs') as mock_save, \
              mock.patch.object(tg.config, 'SAVE_SESSION_LOGS', True):
             # stop_service（无进程运行 → 未运行错误，不触发保存）
             self.api.stop_service()
@@ -476,8 +476,8 @@ class TestLogDedupInStopMethods:
         tg._flask_process = mock_proc
         tg._session_logs_saved = False
 
-        with mock.patch('test_gui.stop_process_gracefully'), \
-             mock.patch('test_gui.save_session_logs') as mock_save, \
+        with mock.patch('gui.stop_process_gracefully'), \
+             mock.patch('gui.save_session_logs') as mock_save, \
              mock.patch.object(tg.config, 'SAVE_SESSION_LOGS', True):
             self.api.stop_service()
             assert mock_save.call_count == 1

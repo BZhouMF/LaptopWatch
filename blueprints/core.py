@@ -16,7 +16,7 @@ from blueprints.auth import login_required, require_mode
 core_bp = Blueprint('core', __name__)
 
 
-@core_bp.route('/setup')
+@core_bp.route('/setup', methods=['GET'])
 def setup_page():
     """启动配置页面（桌面 App 入口，替代 tkinter GUI）"""
     import socket
@@ -31,7 +31,7 @@ def setup_page():
                           media_dir=str(config.MEDIA_DIR) if config.MEDIA_DIR else '')
 
 
-@core_bp.route('/')
+@core_bp.route('/', methods=['GET'])
 @login_required
 def index():
     """首页，根据运行模式返回不同内容"""
@@ -166,7 +166,7 @@ def index():
     finally:
         log_access(request, 'INDEX', '', duration=time.time() - start_time)
 
-@core_bp.route('/browse/<path:dirpath>')
+@core_bp.route('/browse/<path:dirpath>', methods=['GET'])
 @login_required
 @require_mode('normal')
 def browse(dirpath):
@@ -204,7 +204,7 @@ def browse(dirpath):
     finally:
         log_access(request, 'BROWSE', dirpath, duration=time.time() - start_time)
 
-@core_bp.route('/favicon.ico')
+@core_bp.route('/favicon.ico', methods=['GET'])
 def favicon():
     """空favicon响应"""
     return '', 204
@@ -212,14 +212,14 @@ def favicon():
 # ==================== 旧版路由兼容重定向 ====================
 # 以下路由为历史遗留的兼容性重定向，将旧版URL映射到新的蓝图前缀
 
-@core_bp.route('/serve_media/<path:relative_path>')
+@core_bp.route('/serve_media/<path:relative_path>', methods=['GET'])
 @login_required
 def redirect_serve_media(relative_path):
     """兼容重定向：旧版 /serve_media/ -> 新版 /media/serve_media/"""
     from flask import redirect
     return redirect(f'/media/serve_media/{relative_path}')
 
-@core_bp.route('/load_more')
+@core_bp.route('/load_more', methods=['GET'])
 @login_required
 def redirect_load_more():
     """兼容重定向：旧版 /load_more -> 新版 /media/load_more"""
@@ -230,7 +230,7 @@ def redirect_load_more():
         url += f'?{query_string}'
     return redirect(url)
 
-@core_bp.route('/raw/<path:filepath>')
+@core_bp.route('/raw/<path:filepath>', methods=['GET'])
 @login_required
 def redirect_raw(filepath):
     """兼容重定向：旧版 /raw/ -> 新版 /file/raw/"""
@@ -241,7 +241,7 @@ def redirect_raw(filepath):
         url += f'?{query_string}'
     return redirect(url)
 
-@core_bp.route('/view/<path:filepath>')
+@core_bp.route('/view/<path:filepath>', methods=['GET'])
 @login_required
 def redirect_view(filepath):
     """兼容重定向：旧版 /view/ -> 新版 /file/view/"""
@@ -252,7 +252,7 @@ def redirect_view(filepath):
         url += f'?{query_string}'
     return redirect(url)
 
-@core_bp.route('/text/<path:filepath>')
+@core_bp.route('/text/<path:filepath>', methods=['GET'])
 @login_required
 def redirect_text(filepath):
     """兼容重定向：旧版 /text/ -> 新版 /file/text/"""

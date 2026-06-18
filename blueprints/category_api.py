@@ -48,7 +48,7 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
         return [], False
 
 
-@category_bp.route('/data')
+@category_bp.route('/data', methods=['GET'])
 @login_required
 @require_mode('video', 'image')
 def category_data():
@@ -87,7 +87,7 @@ def category_data():
                    duration=time.time() - start_time)
 
 
-@category_bp.route('/browse/<path:folder_path>')
+@category_bp.route('/browse/<path:folder_path>', methods=['GET'])
 @login_required
 @require_mode('video', 'image')
 def category_browse(folder_path):
@@ -147,7 +147,7 @@ def category_browse(folder_path):
                    duration=time.time() - start_time)
 
 
-@category_bp.route('/grid/<path:folder_path>')
+@category_bp.route('/grid/<path:folder_path>', methods=['GET'])
 @login_required
 @require_mode('video', 'image')
 def category_grid(folder_path):
@@ -212,7 +212,7 @@ def category_grid(folder_path):
                    duration=time.time() - start_time)
 
 
-@category_bp.route('/grid_more')
+@category_bp.route('/grid_more', methods=['GET'])
 @login_required
 @require_mode('video', 'image')
 def category_grid_more():

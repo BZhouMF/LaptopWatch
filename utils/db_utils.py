@@ -43,6 +43,7 @@ def get_db(db_path=None):
     path = db_path or config.DB_PATH
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.isolation_level = None
@@ -76,6 +77,13 @@ CREATE TABLE IF NOT EXISTS media (
     cover        BLOB    DEFAULT NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+    id              INTEGER PRIMARY KEY,
+    password_hash   TEXT    NOT NULL,
+    salt            TEXT    NOT NULL,
+    updated_at      TEXT    NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_path  ON nodes(path);
 CREATE INDEX IF NOT EXISTS idx_media_path        ON media(path);
@@ -84,10 +92,35 @@ CREATE INDEX IF NOT EXISTS idx_media_parent_type ON media(parent_id, media_type)
 """
 
 
+def _default_password_hash():
+    """生成默认密码 '123456' 的哈希值（固定盐）"""
+    import hashlib
+    default_salt = 'laptopwatch_v1'
+    return (
+        hashlib.sha256(('123456' + default_salt).encode('utf-8')).hexdigest(),
+        default_salt,
+    )
+
+
+def seed_default_user(conn):
+    """如果 users 表为空，插入默认密码哈希"""
+    existing = conn.execute("SELECT id FROM users LIMIT 1").fetchone()
+    if existing:
+        return
+    pwd_hash, salt = _default_password_hash()
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    conn.execute(
+        "INSERT INTO users (id, password_hash, salt, updated_at) VALUES (1, ?, ?, ?)",
+        (pwd_hash, salt, now),
+    )
+    conn.commit()
+
+
 def init_tables(conn):
-    """创建 nodes + media 表及索引（幂等）"""
+    """创建 nodes + media + users 表及索引（幂等），种子默认用户"""
     conn.executescript(_SCHEMA_SQL)
     conn.commit()
+    seed_default_user(conn)
 
 
 # ---------------------------------------------------------------------------

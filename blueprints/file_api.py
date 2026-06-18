@@ -24,7 +24,7 @@ def _resolve_file_path(raw_path):
     return real_path, None, None
 
 
-@file_bp.route('/raw/<path:filepath>')
+@file_bp.route('/raw/<path:filepath>', methods=['GET'])
 @login_required
 @require_mode('normal')
 def serve_raw(filepath):
@@ -46,7 +46,7 @@ def serve_raw(filepath):
         abs_path = os.path.abspath(urllib.parse.unquote(filepath)) if 'filepath' in locals() else filepath
         log_access(request, 'RAW_PREVIEW_ABS', abs_path, duration=time.time() - start_time)
 
-@file_bp.route('/view/<path:filepath>')
+@file_bp.route('/view/<path:filepath>', methods=['GET'])
 @login_required
 @require_mode('normal')
 def view_file(filepath):
@@ -68,7 +68,7 @@ def view_file(filepath):
         abs_path = os.path.abspath(urllib.parse.unquote(filepath)) if 'filepath' in locals() else filepath
         log_access(request, 'DOWNLOAD_ABS', abs_path, duration=time.time() - start_time)
 
-@file_bp.route('/text/<path:filepath>')
+@file_bp.route('/text/<path:filepath>', methods=['GET'])
 @login_required
 @require_mode('normal')
 def view_text_file(filepath):
@@ -115,7 +115,7 @@ def view_text_file(filepath):
         abs_path = os.path.abspath(urllib.parse.unquote(filepath)) if 'filepath' in locals() else filepath
         log_access(request, 'VIEW_TEXT_ABS', abs_path, duration=time.time() - start_time)
 
-@file_bp.route('/download_folder')
+@file_bp.route('/download_folder', methods=['GET'])
 @login_required
 @require_mode('normal')
 def download_folder():

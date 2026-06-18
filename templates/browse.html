@@ -1,14 +1,117 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>文件浏览</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .browse-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--background);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 200;
+        }
+        .browse-header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+        }
+        .browse-header .sidebar-toggle {
+            position: static;
+            flex-shrink: 0;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        .browse-logo {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .browse-path {
+            font-size: 12px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            direction: rtl;
+            text-align: left;
+        }
+        .browse-header-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .browse-home-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        .browse-home-btn:hover {
+            background: var(--surface-hover);
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        .browse-main {
+            padding: 0 16px 16px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .browse-main h1 {
+            display: none;
+        }
+
+        @media (max-width: 640px) {
+            .browse-header {
+                padding: 8px 12px;
+            }
+            .browse-logo {
+                font-size: 13px;
+            }
+            .browse-path {
+                font-size: 11px;
+                max-width: 120px;
+            }
+            .browse-main {
+                padding: 0 8px 8px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <!-- 侧边栏切换按钮 -->
-    <button id="sidebarToggle" class="sidebar-toggle" title="控制面板">☰</button>
+
+    <header class="browse-header">
+        <div class="browse-header-left">
+            <button id="sidebarToggle" class="sidebar-toggle" title="控制面板">&#9776;</button>
+            <span class="browse-logo">LaptopWatch</span>
+            <span class="browse-path" title="{{ abs_path }}">{{ abs_path }}</span>
+        </div>
+        <div class="browse-header-right">
+            <a href="/" class="browse-home-btn" title="首页">&#8962;</a>
+        </div>
+    </header>
 
     <!-- 侧边栏遮罩 -->
     <div id="sidebarOverlay" class="sidebar-overlay"></div>
@@ -50,43 +153,31 @@
     <div class="browse-main">
         <h1>{{ abs_path }}</h1>
 
-    <!-- 文件夹容器 -->
-    <div id="folderContainer" class="view-container"></div>
-    <!-- 文件容器（包含表头） -->
-    <div id="fileContainer" class="view-container">
-        <div id="listHeader" class="header" style="display:none;">
-            <!-- <div class="col-checkbox"></div> -->
-            <!-- <div class="col-icon"></div> -->
+        <div id="folderContainer" class="view-container"></div>
+        <div id="fileContainer" class="view-container">
+            <div id="listHeader" class="header" style="display:none;"></div>
+        </div>
 
+        <div id="errorMsg" class="error-msg" style="display:none;"></div>
+        <div id="emptyMsg" class="empty-msg" style="display:none;">此文件夹为空</div>
+        <div id="loader" class="loader">正在加载...</div>
+        <div id="endMsg" class="end-msg" style="display:none;">已加载全部</div>
+
+        <div id="selectionBar" class="selection-bar" style="display: none;">
+            <div class="selection-info">
+                <span id="selectedCount">0</span> 个项目已选中
+            </div>
+            <div class="selection-options">
+                <label><input type="radio" name="downloadMode" value="merge" checked> 合并下载</label>
+                <label><input type="radio" name="downloadMode" value="separate"> 分别下载</label>
+            </div>
+            <div class="selection-buttons">
+                <button class="btn" onclick="selectAll()">全选</button>
+                <button class="btn" onclick="cancelSelection()">取消</button>
+                <button class="btn btn-primary" onclick="downloadSelected()">确定下载</button>
+            </div>
         </div>
     </div>
-
-    <!-- 错误信息区域 -->
-    <div id="errorMsg" class="error-msg" style="display:none;"></div>
-    <!-- 空状态提示区域 -->
-    <div id="emptyMsg" class="empty-msg" style="display:none;"> 此文件夹为空</div>
-    <!-- 加载指示器 -->
-    <div id="loader" class="loader">正在加载...</div>
-    <!-- 结束提示 -->
-    <div id="endMsg" class="end-msg" style="display:none;">已加载全部</div>
-
-    <!-- 底部选择栏（多选模式时显示） -->
-    <div id="selectionBar" class="selection-bar" style="display: none;">
-        <div class="selection-info">
-            <span id="selectedCount">0</span> 个项目已选中
-        </div>
-        <div class="selection-options">
-            <label><input type="radio" name="downloadMode" value="merge" checked> 合并下载</label>
-            <label><input type="radio" name="downloadMode" value="separate"> 分别下载</label>
-        </div>
-        <div class="selection-buttons">
-            <button class="btn" onclick="selectAll()">全选</button>
-            <button class="btn" onclick="cancelSelection()">取消</button>
-            <button class="btn btn-primary" onclick="downloadSelected()">确定下载</button>
-        </div>
-    </div>
-
-    </div><!-- /.browse-main -->
 
     <div id="previewModal" class="modal" onclick="closeModal()">
         <span class="modal-close">&times;</span>

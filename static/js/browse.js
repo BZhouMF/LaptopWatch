@@ -269,7 +269,7 @@ function renderItem(item, isFolder) {
 
     let clickAction = '';
     if (!selectionMode && item.is_previewable && !isFolder) {
-        const safeUrl = item.raw_url.replace(/'/g, "\\'");
+        const safeUrl = (window.ROUTES.mediaServe + encodeURIComponent(item.path.replace(/\\/g, '/'))).replace(/'/g, "\\'");
         const safeName = item.name.replace(/'/g, "\\'");
         clickAction = `onclick="openModal('${safeUrl}', '${safeName}', ${!!item.is_video}); return false;"`;
     }
