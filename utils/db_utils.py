@@ -548,12 +548,14 @@ def _format_media_row(row):
 
 def traverse_media(conn, root_path, media_type, offset=0, limit=36,
                    sort_type='name', sort_order='asc',
-                   random_start=False, exclude_paths=None):
+                   random_start=False, exclude_paths=None,
+                   skip_sync=False):
     """文件夹遍历器：用到才核实，动态队列，逐文件夹收集
 
     - 只 sync_folder(root) 一层以发现直接子文件夹
     - 遍历队列动态推进，处理到哪个文件夹才 sync 哪个
     - 处理中发现的子文件夹追加到队尾，深层嵌套自然处理
+    - skip_sync=True 跳过文件系统扫描，纯 DB 读取（用于翻页）
     - 返回 (items, next_offset, has_more)
     """
     init_tables(conn)
@@ -561,7 +563,8 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     root_id = _ensure_node(conn, root_path)
 
     # 同步根目录（1 层）以发现直接子文件夹
-    sync_folder(conn, root_path)
+    if not skip_sync:
+        sync_folder(conn, root_path)
 
     # 从 DB 取根目录的直接子文件夹，构建初始队列
     subdirs = get_subfolder_nodes(conn, root_id, sort_type, sort_order)
@@ -575,9 +578,9 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
     queue.extend((f['id'], f['path']) for f in subdirs)
 
     logger.debug(
-        "traverse_media: root=%s type=%s offset=%d limit=%d init_folders=%d exclude=%d",
+        "traverse_media: root=%s type=%s offset=%d limit=%d init_folders=%d exclude=%d skip_sync=%s",
         root_path, media_type, offset, limit, len(subdirs),
-        len(exclude_paths) if exclude_paths else 0,
+        len(exclude_paths) if exclude_paths else 0, skip_sync,
     )
 
     collected = []
@@ -591,7 +594,7 @@ def traverse_media(conn, root_path, media_type, offset=0, limit=36,
         queue_idx += 1
 
         # 用到才核实：根目录已在上方同步，子文件夹遍历到才 sync
-        if queue_idx > 1:
+        if not skip_sync and queue_idx > 1:
             sync_folder(conn, seg_path)
             # 发现新的子文件夹，追加到队尾
             new_subs = get_subfolder_nodes(conn, seg_id, sort_type, sort_order)

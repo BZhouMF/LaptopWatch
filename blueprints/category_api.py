@@ -15,14 +15,20 @@ from blueprints.auth import login_required, require_mode
 category_bp = Blueprint('category', __name__, url_prefix='/category')
 
 
+_scanned_folders = set()  # 已同步过的文件夹，点击刷新可清除
+
+
 def _sync_db(folder_path):
-    """同步当前文件夹到 DB（目录浏览模式辅助）"""
+    """同步当前文件夹到 DB，同目录只扫描一次"""
+    if folder_path in _scanned_folders:
+        return
     try:
         if config.DB_PATH and config.MEDIA_DIR:
             from utils.db_utils import get_db, sync_folder
             conn = get_db()
             sync_folder(conn, folder_path)
             conn.close()
+            _scanned_folders.add(folder_path)
     except Exception:
         pass
 
@@ -39,6 +45,7 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
                 offset=offset, limit=limit,
                 sort_type=config.SORT_TYPE,
                 sort_order=config.SORT_ORDER,
+                skip_sync=True,
             )
             conn.close()
             return files, has_more
@@ -75,7 +82,8 @@ def category_data():
 
         info = get_category_children_info(
             str(full_path), config.RUN_MODE,
-            random_mode=config.RANDOM_MODE
+            random_mode=config.RANDOM_MODE,
+            already_synced=_scanned_folders,
         )
 
         return jsonify({'code': 0, 'data': info})
@@ -114,13 +122,18 @@ def category_browse(folder_path):
 
         folder_rel = decoded_path.replace('\\', '/')
 
+        # 手动刷新 → 清除节流阀，强制重新扫描
+        if request.args.get('refresh') == '1':
+            _scanned_folders.discard(str(full_path))
+
         # 同步 DB 确保 per-disk 表已更新
         _sync_db(str(full_path))
 
         # 获取分类信息（内部已过滤空文件夹）
         info = get_category_children_info(
             str(full_path), config.RUN_MODE,
-            random_mode=config.RANDOM_MODE
+            random_mode=config.RANDOM_MODE,
+            already_synced=_scanned_folders,
         )
 
         # 兜底规则：只有一个分类有文件且无根文件 → 直接跳转到网格页面
@@ -162,6 +175,10 @@ def category_grid(folder_path):
         if not full_path.exists() or not full_path.is_dir():
             return '目录不存在', 404
 
+        # 手动刷新 → 清除节流阀，强制重新扫描
+        if request.args.get('refresh') == '1':
+            _scanned_folders.discard(str(full_path))
+
         # 同步 DB 确保 per-disk 表已更新
         _sync_db(str(full_path))
 
@@ -183,11 +200,11 @@ def category_grid(folder_path):
             while True:
                 if str(check_path.resolve()) == str(config.MEDIA_DIR.resolve()):
                     parent_path = ''
-                    if check_browse_would_redirect(config.MEDIA_DIR):
+                    if check_browse_would_redirect(config.MEDIA_DIR, already_synced=_scanned_folders):
                         hide_back = True
                     break
 
-                if check_browse_would_redirect(check_path):
+                if check_browse_would_redirect(check_path, already_synced=_scanned_folders):
                     check_path = check_path.parent
                 else:
                     parent_rel = os.path.relpath(str(check_path), str(config.MEDIA_DIR))

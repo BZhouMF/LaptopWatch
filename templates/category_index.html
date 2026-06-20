@@ -12,6 +12,10 @@
             padding: 12px 0;
             margin-bottom: 16px;
             border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--background);
         }
         .back-btn {
             padding: 6px 14px;
@@ -31,6 +35,21 @@
             font-weight: 700;
             color: var(--text-primary);
             margin: 0;
+            flex: 1;
+        }
+        .refresh-btn {
+            padding: 6px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-primary);
+            text-decoration: none;
+            margin-left: auto;
+        }
+        .refresh-btn:hover {
+            background: var(--surface-hover);
         }
         .category-section {
             margin-bottom: 28px;
@@ -74,6 +93,7 @@
         <a href="{{ '/category/browse/' + parent_path if parent_path else '/' }}" class="back-btn">&larr; 返回</a>
         {% endif %}
         <h1>{{ category_info.folder_name }}</h1>
+        <a href="/category/browse/{{ current_path }}?refresh=1" class="refresh-btn">刷新</a>
     </div>
 
     <!-- 分类区块 -->

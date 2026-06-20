@@ -696,11 +696,23 @@ def main():
         resizable=True,
         min_size=(700, 600),
     )
-    webview.start(debug=False)
+    webview.start(icon=str(Path(__file__).parent / 'BB.ico'), debug=False)
 
     # 窗口正常关闭后清理
     _run_cleanup()
 
 
+def _set_app_user_model_id():
+    """设置 AppUserModelID，使任务栏图标绑定到窗口图标而非 python.exe"""
+    if os.name != 'nt':
+        return
+    import ctypes
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('LaptopWatch.BZhouMF.1')
+    except Exception:
+        pass
+
+
 if __name__ == '__main__':
+    _set_app_user_model_id()
     main()

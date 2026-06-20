@@ -150,7 +150,8 @@ def _collect_files_recursive_random(folder_path, limit, run_mode, conn=None):
             conn.close()
 
 
-def get_category_children_info(folder_path, run_mode, limit=None, random_mode=False):
+def get_category_children_info(folder_path, run_mode, limit=None, random_mode=False,
+                              already_synced=None):
     """
     获取某文件夹的分类结构信息。
 
@@ -159,6 +160,7 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
         run_mode: 运行模式 ('video' 或 'image')
         limit: 每个分类区块的文件上限，默认 config.CATEGORY_PAGE_SIZE
         random_mode: 是否启用随机位置
+        already_synced: 可选 set，已同步过的文件夹路径集合，用于跳过重复 sync
 
     Returns:
         dict: {
@@ -228,7 +230,10 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
             sub_is_leaf = len(sub_subfolders) == 0
 
             # 收集文件（先同步再查询，确保 DB 中有该子文件夹的数据）
-            sync_folder(shared_conn, sub_path)
+            if already_synced is None or sub_path not in already_synced:
+                sync_folder(shared_conn, sub_path)
+                if already_synced is not None:
+                    already_synced.add(sub_path)
             if random_mode:
                 files = _collect_files_recursive_random(sub_path, limit, run_mode, conn=shared_conn)
             else:
@@ -257,7 +262,7 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
     return result
 
 
-def check_browse_would_redirect(folder_path):
+def check_browse_would_redirect(folder_path, already_synced=None):
     """
     检查浏览该文件夹时是否会重定向到 grid 页面。
     返回 True 表示 /category/browse/ 会触发重定向（叶子或单分类兜底），
@@ -265,7 +270,8 @@ def check_browse_would_redirect(folder_path):
     """
     info = get_category_children_info(
         str(folder_path), config.RUN_MODE,
-        random_mode=config.RANDOM_MODE
+        random_mode=config.RANDOM_MODE,
+        already_synced=already_synced,
     )
 
     # 叶子节点（无子文件夹）→ grid
