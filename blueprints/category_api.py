@@ -193,7 +193,7 @@ def category_grid(folder_path):
         conn = get_db()
         _sync_db(str(full_path), conn=conn)
 
-        page_size = config.CATEGORY_DETAIL_PAGE_SIZE
+        page_size = config.PAGE_FIRST
         files, has_more = _get_lazy_page_files(
             str(full_path), 0, page_size, config.RUN_MODE
         )

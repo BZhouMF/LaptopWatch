@@ -275,7 +275,8 @@
         folderName: {{ folder_name|tojson|safe }},
         parentPath: {{ parent_path|tojson|safe }},
         hideBack: {{ hide_back|tojson|safe }},
-        pageSize: {{ page_size }},
+        pageFirst: {{ config.PAGE_FIRST }},
+        pageLoad: {{ config.PAGE_LOAD }},
         files: _files,
         hasMore: {{ has_more|tojson|safe }}
     };

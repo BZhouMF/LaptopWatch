@@ -16,7 +16,8 @@
     var gridCurrentPage = 1;
     var gridHasMore = true;
     var gridFolderPath = '';
-    var gridPageSize = 36;
+    var gridPageFirst = 35;
+    var gridPageLoad = 35;
     var gridIsLoading = false;
     var gridAbortController = null;
 
@@ -147,7 +148,11 @@
         if (!page) page = 1;
 
         gridFolderPath = folderPath;
-        gridPageSize = window.SPA_INITIAL_STATE ? window.SPA_INITIAL_STATE.pageSize || 36 : 36;
+        // 页面尺寸从 SPA_INITIAL_STATE 读取，默认为 35
+        if (window.SPA_INITIAL_STATE) {
+            gridPageFirst = window.SPA_INITIAL_STATE.pageFirst || 35;
+            gridPageLoad = window.SPA_INITIAL_STATE.pageLoad || 35;
+        }
         gridPageCache = {};
         gridCurrentPage = page;
         gridHasMore = true;
@@ -156,7 +161,9 @@
         var parentPath = getParentPath(folderPath);
         var folderName = folderPath.split('/').filter(Boolean).pop() || (window.SPA_INITIAL_STATE && window.SPA_INITIAL_STATE.folderName) || '';
 
-        // 先创建栈条目，再加载数据
+        // 立即渲染头部（刷新/返回按钮指向当前文件夹）
+        renderGridHeader(folderName, folderPath, parentPath);
+
         var entry = {
             type: 'grid',
             path: folderPath,
@@ -164,7 +171,8 @@
             parentPath: parentPath,
             folderName: folderName,
             pageCache: {},
-            gridPageSize: gridPageSize
+            gridPageFirst: gridPageFirst,
+            gridPageLoad: gridPageLoad
         };
 
         if (pushHistory) {
@@ -173,7 +181,26 @@
             history.pushState({ spaIndex: currentIndex }, '', gridUrl);
         }
 
+        // 加载第一页数据
         gridLoadPage(page, false);
+    }
+
+    function restoreGridFromEntry(entry) {
+        gridFolderPath = entry.path;
+        gridPageFirst = entry.gridPageFirst || 35;
+        gridPageLoad = entry.gridPageLoad || 35;
+        gridPageCache = entry.pageCache || {};
+        gridCurrentPage = entry.page || 1;
+        gridHasMore = true;
+        gridIsLoading = false;
+
+        var cached = gridPageCache[gridCurrentPage];
+        if (cached && cached.items && cached.items.length > 0) {
+            renderGridView(cached.items, entry.path, gridCurrentPage, cached.hasMore, entry.folderName, entry.parentPath);
+        } else {
+            renderGridSkeleton(entry.folderName, entry.parentPath);
+            gridLoadPage(gridCurrentPage, false);
+        }
     }
 
     function navigateBack(fallbackHref) {
@@ -187,7 +214,6 @@
         var entry = currentEntry();
         if (!entry) return;
 
-        // 更新浏览器历史（不推新条目，用 replaceState 修正当前 URL）
         var backUrl;
         if (entry.type === 'category') {
             backUrl = entry.path ? window.ROUTES.categoryBrowse + encodeURIComponent(entry.path) : '/';
@@ -196,23 +222,10 @@
         }
         history.replaceState({ spaIndex: currentIndex }, '', backUrl);
 
-        // 渲染
         if (entry.type === 'category') {
             renderCategoryView(entry.data, entry.path, entry.parentPath, entry.isHomepage);
         } else {
-            gridFolderPath = entry.path;
-            gridPageSize = entry.gridPageSize || 36;
-            gridPageCache = entry.pageCache || {};
-            gridCurrentPage = entry.page || 1;
-            gridHasMore = true; // 会由 loadPage 更新
-            gridIsLoading = false;
-
-            var cached = gridPageCache[gridCurrentPage];
-            if (cached && cached.items && cached.items.length > 0) {
-                renderGridView(cached.items, entry.path, gridCurrentPage, cached.hasMore, entry.folderName, entry.parentPath);
-            } else {
-                gridLoadPage(gridCurrentPage, false);
-            }
+            restoreGridFromEntry(entry);
         }
     }
 
@@ -235,19 +248,7 @@
         if (entry.type === 'category') {
             renderCategoryView(entry.data, entry.path, entry.parentPath, entry.isHomepage);
         } else {
-            gridFolderPath = entry.path;
-            gridPageSize = entry.gridPageSize || 36;
-            gridPageCache = entry.pageCache || {};
-            gridCurrentPage = entry.page || 1;
-            gridHasMore = true;
-            gridIsLoading = false;
-
-            var cached = gridPageCache[gridCurrentPage];
-            if (cached && cached.items && cached.items.length > 0) {
-                renderGridView(cached.items, entry.path, gridCurrentPage, cached.hasMore, entry.folderName, entry.parentPath);
-            } else {
-                gridLoadPage(gridCurrentPage, false);
-            }
+            restoreGridFromEntry(entry);
         }
     }
 
@@ -277,19 +278,7 @@
         if (entry.type === 'category') {
             renderCategoryView(entry.data, entry.path, entry.parentPath, entry.isHomepage);
         } else {
-            gridFolderPath = entry.path;
-            gridPageSize = entry.gridPageSize || 36;
-            gridPageCache = entry.pageCache || {};
-            gridCurrentPage = entry.page || 1;
-            gridHasMore = true;
-            gridIsLoading = false;
-
-            var cached = gridPageCache[gridCurrentPage];
-            if (cached && cached.items && cached.items.length > 0) {
-                renderGridView(cached.items, entry.path, gridCurrentPage, cached.hasMore, entry.folderName, entry.parentPath);
-            } else {
-                gridLoadPage(gridCurrentPage, false);
-            }
+            restoreGridFromEntry(entry);
         }
     }
 
@@ -378,20 +367,23 @@
     }
 
     // ==================== 渲染：Grid 视图 ====================
-    function renderGridView(items, folderPath, page, hasMore, folderName, parentPath) {
-        // Header
-        var headerHtml = '';
-        if (parentPath !== undefined && parentPath !== null) {
-            headerHtml += '<a href="javascript:void(0)" class="back-btn" data-spa-nav="back">&larr; 返回</a>';
-        }
-        headerHtml += '<h1>' + escHtml(folderName) + '</h1>';
-        headerHtml += '<a href="/category/grid/' + encodeURIComponent(folderPath) + '?refresh=1" class="refresh-btn">刷新</a>';
-
+    function renderGridHeader(folderName, folderPath, parentPath) {
         var header = document.getElementById('spaHeader');
         header.className = 'grid-header';
-        header.innerHTML = headerHtml;
 
-        // Grid
+        var html = '';
+        if (parentPath || canGoBack()) {
+            html += '<a href="' + (parentPath ? window.ROUTES.categoryBrowse + encodeURIComponent(parentPath) : '/') + '" class="back-btn" data-spa-nav="back">&larr; 返回</a>';
+        }
+        html += '<h1>' + escHtml(folderName) + '</h1>';
+        // 路径编码：保留 / 不编码，其他字符用 encodeURIComponent 逐段处理
+        var encodedPath = folderPath.split('/').map(function(seg) { return encodeURIComponent(seg); }).join('/');
+        html += '<a href="/category/grid/' + encodedPath + '?refresh=1" class="refresh-btn">刷新</a>';
+        header.innerHTML = html;
+    }
+
+    function renderGridView(items, folderPath, page, hasMore, folderName, parentPath) {
+        renderGridHeader(folderName, folderPath, parentPath);
         gridRenderItems(items, page, hasMore);
     }
 
@@ -488,11 +480,12 @@
         }
         gridAbortController = new AbortController();
 
-        var offset = (page - 1) * gridPageSize;
+        var pageSize = page === 1 ? gridPageFirst : gridPageLoad;
+        var offset = page === 1 ? 0 : gridPageFirst + (page - 2) * gridPageLoad;
         var url = window.ROUTES.categoryGridMore
             + '?path=' + encodeURIComponent(gridFolderPath)
             + '&offset=' + offset
-            + '&limit=' + gridPageSize;
+            + '&limit=' + pageSize;
 
         fetch(url, { signal: gridAbortController.signal })
             .then(function(res) { return res.json(); })
@@ -618,21 +611,7 @@
                 if (entry.type === 'category') {
                     renderCategoryView(entry.data, entry.path, entry.parentPath, entry.isHomepage);
                 } else {
-                    gridFolderPath = entry.path;
-                    gridPageSize = entry.gridPageSize || 36;
-                    gridPageCache = entry.pageCache || {};
-                    gridCurrentPage = entry.page || 1;
-                    gridHasMore = true;
-                    gridIsLoading = false;
-
-                    // 从缓存恢复或重新加载
-                    var cached = gridPageCache[gridCurrentPage];
-                    if (cached && cached.items && cached.items.length > 0) {
-                        renderGridView(cached.items, entry.path, gridCurrentPage, cached.hasMore, entry.folderName, entry.parentPath);
-                    } else {
-                        renderGridSkeleton(entry.folderName, entry.parentPath);
-                        gridLoadPage(gridCurrentPage, false);
-                    }
+                    restoreGridFromEntry(entry);
                 }
                 return;
             }
@@ -645,7 +624,8 @@
 
         if (initState.viewType === 'grid') {
             gridFolderPath = initState.folderPath || '';
-            gridPageSize = initState.pageSize || 36;
+            gridPageFirst = initState.pageFirst || 35;
+            gridPageLoad = initState.pageLoad || 35;
             gridCurrentPage = 1;
             gridHasMore = initState.hasMore !== undefined ? initState.hasMore : false;
             gridIsLoading = false;
@@ -663,7 +643,8 @@
                 parentPath: initState.parentPath || '',
                 folderName: initState.folderName || '',
                 pageCache: gridPageCache,
-                gridPageSize: gridPageSize
+                gridPageFirst: gridPageFirst,
+                gridPageLoad: gridPageLoad
             };
             pushEntry(entry);
             history.replaceState({ spaIndex: currentIndex }, '', window.location.href);
