@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ category_info.folder_name }} - {{ '视频模式' if config.RUN_MODE == 'video' else '图片模式' }}</title>
+    <title>{{ category_info.folder_name if category_info else folder_name }} - {{ '视频模式' if config.RUN_MODE == 'video' else '图片模式' }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
+        /* ====== 分类视图头部 ====== */
         .category-header {
             display: flex;
             align-items: center;
@@ -17,6 +18,20 @@
             z-index: 100;
             background: var(--background);
         }
+
+        /* ====== Grid 视图头部 ====== */
+        .grid-header {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            margin-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: var(--background);
+        }
+
         .back-btn {
             padding: 6px 14px;
             background: var(--surface);
@@ -25,12 +40,12 @@
             cursor: pointer;
             font-size: 14px;
             color: var(--text-primary);
+            text-decoration: none;
             margin-right: 14px;
         }
-        .back-btn:hover {
-            background: var(--surface-hover);
-        }
-        .category-header h1 {
+        .back-btn:hover { background: var(--surface-hover); }
+
+        .category-header h1, .grid-header h1 {
             font-size: 20px;
             font-weight: 700;
             color: var(--text-primary);
@@ -48,12 +63,9 @@
             text-decoration: none;
             margin-left: auto;
         }
-        .refresh-btn:hover {
-            background: var(--surface-hover);
-        }
-        .category-section {
-            margin-bottom: 28px;
-        }
+        .refresh-btn:hover { background: var(--surface-hover); }
+
+        .category-section { margin-bottom: 28px; }
         .category-title-bar {
             display: flex;
             justify-content: space-between;
@@ -75,83 +87,243 @@
             font-size: 13px;
             text-decoration: none;
         }
-        .show-more-btn:hover {
-            background: var(--primary-dark);
-        }
+        .show-more-btn:hover { background: var(--primary-dark); }
         .category-empty {
             color: var(--text-muted);
             font-size: 14px;
             padding: 8px 0;
         }
+
+        /* ====== Grid 分页 ====== */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 24px 0;
+            gap: 10px;
+        }
+        .page-btn {
+            padding: 8px 16px;
+            background: #4361ee;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .page-btn:hover:not(:disabled) { background: #3a56d4; }
+        .page-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        .page-numbers { display: flex; gap: 5px; }
+        .page-number {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .page-number:hover { background: #f0f0f0; }
+        .page-number.current {
+            background: #4361ee;
+            color: white;
+            border-color: #4361ee;
+        }
+        .page-dots { padding: 6px 6px; color: #666; }
+        .no-more {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            display: none;
+        }
     </style>
 </head>
 <body>
 
-    <!-- 页面头部 -->
-    <div class="category-header">
+    <!-- ====== 头部 ====== -->
+    {% if view_type == 'grid' %}
+    <div id="spaHeader" class="grid-header">
+        {% if not hide_back %}
+        <a href="{{ '/category/browse/' + parent_path if parent_path else '/' }}" class="back-btn" data-spa-nav="back">&larr; 返回</a>
+        {% endif %}
+        <h1>{{ folder_name }}</h1>
+        <a href="/category/grid/{{ folder_path }}?refresh=1" class="refresh-btn">刷新</a>
+    </div>
+    {% else %}
+    <div id="spaHeader" class="category-header">
         {% if not is_homepage %}
-        <a href="{{ '/category/browse/' + parent_path if parent_path else '/' }}" class="back-btn">&larr; 返回</a>
+        <a href="{{ '/category/browse/' + parent_path if parent_path else '/' }}" class="back-btn" data-spa-nav="back">&larr; 返回</a>
         {% endif %}
         <h1>{{ category_info.folder_name }}</h1>
         <a href="/category/browse/{{ current_path }}?refresh=1" class="refresh-btn">刷新</a>
     </div>
+    {% endif %}
 
-    <!-- 分类区块 -->
-    {% for cat in category_info.categories %}
-    <div class="category-section">
-        <div class="category-title-bar">
-            <span class="category-title">{{ cat.name }}</span>
-            <a href="{{ '/category/browse/' + cat.path }}" class="show-more-btn">显示更多</a>
-        </div>
-        <div class="video-grid">
-            {% for item in cat.files %}
-            <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
-                <div class="video-thumb">
-                    {% if item.is_video or item.is_image %}
-                    <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
-                    {% endif %}
+    <!-- ====== 内容区 ====== -->
+    <div id="spaContent">
+        {% if view_type == 'grid' %}
+            <div id="mediaGrid" class="video-grid">
+                {% for item in files %}
+                <div class="video-card" onclick="openMedia('{{ item.relative_path | e }}')">
+                    <div class="video-thumb">
+                        {% if item.is_video or item.is_image %}
+                        <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
+                        {% endif %}
+                    </div>
+                    <div class="video-info">
+                        <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                    </div>
                 </div>
-                <div class="video-info">
-                    <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                {% endfor %}
+            </div>
+        {% else %}
+            {% for cat in category_info.categories %}
+            <div class="category-section">
+                <div class="category-title-bar">
+                    <span class="category-title">{{ cat.name }}</span>
+                    <a href="{{ '/category/browse/' + cat.path }}" class="show-more-btn" data-spa-nav="category" data-spa-path="{{ cat.path }}">显示更多</a>
+                </div>
+                <div class="video-grid">
+                    {% for item in cat.files %}
+                    <div class="video-card" onclick="openMedia('{{ item.relative_path | e }}')">
+                        <div class="video-thumb">
+                            {% if item.is_video or item.is_image %}
+                            <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
+                            {% endif %}
+                        </div>
+                        <div class="video-info">
+                            <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
             {% endfor %}
-        </div>
-    </div>
-    {% endfor %}
 
-    <!-- 根目录文件区 -->
-    {% if category_info.root_files %}
-    <div class="category-section">
-        <div class="category-title-bar">
-            <span class="category-title">{{ category_info.folder_name }} / 文件</span>
-        </div>
-        <div class="video-grid">
-            {% for item in category_info.root_files %}
-            <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
-                <div class="video-thumb">
-                    {% if item.is_video or item.is_image %}
-                    <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
-                    {% endif %}
+            {% if category_info.root_files %}
+            <div class="category-section">
+                <div class="category-title-bar">
+                    <span class="category-title">{{ category_info.folder_name }} / 文件</span>
                 </div>
-                <div class="video-info">
-                    <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                <div class="video-grid">
+                    {% for item in category_info.root_files %}
+                    <div class="video-card" onclick="openMedia('{{ item.relative_path | e }}')">
+                        <div class="video-thumb">
+                            {% if item.is_video or item.is_image %}
+                            <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
+                            {% endif %}
+                        </div>
+                        <div class="video-info">
+                            <div class="video-name" title="{{ item.name }}">{{ item.name }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
             </div>
-            {% endfor %}
-        </div>
+            {% endif %}
+
+            {% if not category_info.categories and not category_info.root_files %}
+            <div class="category-empty">该目录下没有可展示的内容。</div>
+            {% endif %}
+        {% endif %}
     </div>
-    {% endif %}
 
-    {% if not category_info.categories and not category_info.root_files %}
-    <div class="category-empty">该目录下没有可展示的内容。</div>
-    {% endif %}
+    <!-- ====== 底部：分页 / 加载 / 结束 ====== -->
+    <div id="spaFooter">
+        {% if view_type == 'grid' %}
+        <div class="pagination" id="gridPagination">
+            <button id="gridPrevPage" class="page-btn" disabled>上一页</button>
+            <div class="page-numbers" id="gridPageNumbers">
+                <span class="page-number current">1</span>
+                {% if has_more %}<span class="page-dots">...</span>{% endif %}
+            </div>
+            <button id="gridNextPage" class="page-btn" {{ 'disabled' if not has_more else '' }}>下一页</button>
+        </div>
+        {% endif %}
+    </div>
 
+    <div class="loading" id="spaLoading">加载中...</div>
+    <div class="no-more" id="spaNoMore" style="display: {{ 'block' if view_type == 'grid' and not has_more else 'none' }}">没有更多了</div>
+
+    <!-- ====== SPA 初始化 ====== -->
     <script>window.ROUTES = {{ ROUTES | tojson }};</script>
     <script>
-        function openMedia(relativePath) {
-            window.location.href = window.ROUTES.mediaPlayer + '?path=' + encodeURIComponent(relativePath);
-        }
+    {% if view_type == 'grid' %}
+    var _files = [];
+    {% for item in files %}
+    _files.push({
+        name: {{ item.name|tojson|safe }},
+        relative_path: {{ item.relative_path|tojson|safe }},
+        mtime: {{ item.mtime|tojson|safe }},
+        timestamp: {{ item.timestamp|tojson|safe }},
+        is_video: {{ item.is_video|tojson|safe }},
+        is_image: {{ item.is_image|tojson|safe }}
+    });
+    {% endfor %}
+    window.SPA_INITIAL_STATE = {
+        viewType: 'grid',
+        folderPath: {{ folder_path|tojson|safe }},
+        folderName: {{ folder_name|tojson|safe }},
+        parentPath: {{ parent_path|tojson|safe }},
+        hideBack: {{ hide_back|tojson|safe }},
+        pageSize: {{ page_size }},
+        files: _files,
+        hasMore: {{ has_more|tojson|safe }}
+    };
+    {% else %}
+    var _cats = [];
+    {% for cat in category_info.categories %}
+    var _catFiles = [];
+    {% for item in cat.files %}
+    _catFiles.push({
+        name: {{ item.name|tojson|safe }},
+        relative_path: {{ item.relative_path|tojson|safe }},
+        mtime: {{ item.mtime|tojson|safe }},
+        timestamp: {{ item.timestamp|tojson|safe }},
+        is_video: {{ item.is_video|tojson|safe }},
+        is_image: {{ item.is_image|tojson|safe }}
+    });
+    {% endfor %}
+    _cats.push({
+        name: {{ cat.name|tojson|safe }},
+        path: {{ cat.path|tojson|safe }},
+        is_leaf: {{ cat.is_leaf|tojson|safe }},
+        has_files: {{ cat.has_files|tojson|safe }},
+        files: _catFiles
+    });
+    {% endfor %}
+    var _rootFiles = [];
+    {% for item in category_info.root_files %}
+    _rootFiles.push({
+        name: {{ item.name|tojson|safe }},
+        relative_path: {{ item.relative_path|tojson|safe }},
+        mtime: {{ item.mtime|tojson|safe }},
+        timestamp: {{ item.timestamp|tojson|safe }},
+        is_video: {{ item.is_video|tojson|safe }},
+        is_image: {{ item.is_image|tojson|safe }}
+    });
+    {% endfor %}
+    window.SPA_INITIAL_STATE = {
+        viewType: 'category',
+        folderPath: {{ category_info.folder_path|tojson|safe }},
+        folderName: {{ category_info.folder_name|tojson|safe }},
+        parentPath: {{ parent_path|tojson|safe }},
+        isHomepage: {{ is_homepage|tojson|safe }},
+        categories: _cats,
+        rootFiles: _rootFiles,
+        totalCategories: {{ category_info.total_categories }}
+    };
+    {% endif %}
     </script>
+    <script src="{{ url_for('static', filename='js/category_spa.js') }}"></script>
 </body>
 </html>

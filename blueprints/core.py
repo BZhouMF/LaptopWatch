@@ -79,6 +79,7 @@ def index():
                 return redirect(f'/category/grid/{only_cat["path"]}?from_override=1')
 
             return render_template('category_index.html',
+                                   view_type='category',
                                    category_info=info,
                                    parent_path='',
                                    current_path='',

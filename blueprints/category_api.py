@@ -151,6 +151,7 @@ def category_browse(folder_path):
         # 有非空子文件夹 → 分类页面
         if info['total_categories'] > 0:
             return render_template('category_index.html',
+                                   view_type='category',
                                    category_info=info,
                                    parent_path=parent_path,
                                    current_path=folder_rel,
@@ -224,7 +225,8 @@ def category_grid(folder_path):
                         parent_path = ''
                     break
 
-        return render_template('category_grid.html',
+        return render_template('category_index.html',
+                               view_type='grid',
                                files=files,
                                folder_name=full_path.name,
                                folder_path=decoded_path.replace('\\', '/'),
