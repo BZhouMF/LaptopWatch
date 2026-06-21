@@ -371,7 +371,8 @@
         if (item.is_video || item.is_image) {
             thumbHtml = '<img src="' + window.ROUTES.mediaThumbnail + encodeURIComponent(item.relative_path) + '" alt="' + escAttr(item.name) + '" loading="lazy">';
         }
-        return '<div class="video-card" onclick="openMedia(\'' + escAttr(item.relative_path) + '\')">' +
+        var safePath = item.relative_path.replace(/'/g, "\\'");
+        return '<div class="video-card" onclick="openMedia(\'' + safePath + '\')">' +
             '<div class="video-thumb">' + thumbHtml + '</div>' +
             '<div class="video-info"><div class="video-name" title="' + escAttr(item.name) + '">' + escHtml(item.name) + '</div></div>' +
             '</div>';

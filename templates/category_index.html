@@ -173,7 +173,7 @@
         {% if view_type == 'grid' %}
             <div id="mediaGrid" class="video-grid">
                 {% for item in files %}
-                <div class="video-card" onclick="openMedia('{{ item.relative_path | e }}')">
+                <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
                     <div class="video-thumb">
                         {% if item.is_video or item.is_image %}
                         <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
@@ -194,7 +194,7 @@
                 </div>
                 <div class="video-grid">
                     {% for item in cat.files %}
-                    <div class="video-card" onclick="openMedia('{{ item.relative_path | e }}')">
+                    <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
                         <div class="video-thumb">
                             {% if item.is_video or item.is_image %}
                             <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
@@ -216,7 +216,7 @@
                 </div>
                 <div class="video-grid">
                     {% for item in category_info.root_files %}
-                    <div class="video-card" onclick="openMedia('{{ item.relative_path | e }}')">
+                    <div class="video-card" onclick='openMedia({{ item.relative_path|tojson|safe }})'>
                         <div class="video-thumb">
                             {% if item.is_video or item.is_image %}
                             <img src="{{ ROUTES.mediaThumbnail }}{{ item.relative_path | path_quote }}" alt="{{ item.name }}" loading="lazy">
