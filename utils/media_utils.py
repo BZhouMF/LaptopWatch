@@ -226,7 +226,8 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
         if node:
             rows, _ = get_direct_media(
                 shared_conn, node['id'], media_type,
-                config.SORT_TYPE, config.SORT_ORDER)
+                config.SORT_TYPE, config.SORT_ORDER,
+                limit=limit)
             result['root_files'] = [_format_db_row(r) for r in rows]
     except Exception:
         logger.debug(f"get_category_children_info: 根文件查询失败")

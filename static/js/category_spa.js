@@ -111,8 +111,8 @@
                     return;
                 }
 
-                // 有分类 → 渲染分类视图
-                if (info.total_categories > 0 || (info.root_files && info.root_files.length > 0)) {
+                // 有非空子文件夹 → 渲染分类视图（与 SSR category_browse 一致）
+                if (info.total_categories > 0) {
                     var entry = {
                         type: 'category',
                         path: folderPath,
