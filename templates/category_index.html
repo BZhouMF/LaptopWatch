@@ -76,6 +76,12 @@
             font-size: 16px;
             font-weight: 600;
             color: var(--text-primary);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 8px;
         }
         .show-more-btn {
             padding: 4px 12px;
@@ -86,6 +92,8 @@
             cursor: pointer;
             font-size: 13px;
             text-decoration: none;
+            flex-shrink: 0;
+            white-space: nowrap;
         }
         .show-more-btn:hover { background: var(--primary-dark); }
         .category-empty {
