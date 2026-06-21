@@ -166,7 +166,7 @@ def load_more():
 
 @media_bp.route('/thumbnail/<path:relative_path>', methods=['GET'])
 @login_required
-@require_mode('video', 'image', 'douyin')
+@require_mode('video', 'image', 'douyin', 'normal')
 def api_thumbnail(relative_path):
     """生成并返回媒体文件缩略图（DB cover 优先，回退到实时生成）"""
     from utils.thumbnail_utils import generate_thumbnail

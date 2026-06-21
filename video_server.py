@@ -83,12 +83,14 @@ async def serve_video(file_path: str, request: Request):
     if decoded.startswith('/'):
         decoded = decoded[1:]
 
-    if not MEDIA_DIR or not MEDIA_DIR.exists():
-        return Response(status_code=404)
+    if MEDIA_DIR and MEDIA_DIR.exists():
+        target = (MEDIA_DIR / decoded).resolve()
+        if not str(target).startswith(str(MEDIA_DIR)):
+            return Response(status_code=403)
+    else:
+        from pathlib import Path
+        target = Path(decoded).resolve()
 
-    target = (MEDIA_DIR / decoded).resolve()
-    if not str(target).startswith(str(MEDIA_DIR)):
-        return Response(status_code=403)
     if not target.is_file():
         return Response(status_code=404)
 

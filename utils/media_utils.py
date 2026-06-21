@@ -103,6 +103,16 @@ def _format_db_row(r):
 
 # ==================== 目录浏览模式工具函数 ====================
 
+_would_redirect_cache: dict[str, bool] = {}
+
+
+def invalidate_cache(clear_key: str | None = None):
+    """清除重定向缓存，clear_key 为 None 时全清空"""
+    if clear_key is None:
+        _would_redirect_cache.clear()
+    else:
+        _would_redirect_cache.pop(str(clear_key), None)
+
 
 def _collect_files_recursive(folder_path, limit, run_mode, conn=None):
     """从文件夹递归收集媒体文件（纯 DB 查询，不 sync），返回最多 limit 个格式化项"""
@@ -151,7 +161,7 @@ def _collect_files_recursive_random(folder_path, limit, run_mode, conn=None):
 
 
 def get_category_children_info(folder_path, run_mode, limit=None, random_mode=False,
-                              already_synced=None):
+                              already_synced=None, conn=None):
     """
     获取某文件夹的分类结构信息。
 
@@ -205,9 +215,13 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
 
     # 收集根目录下的直接文件（仅当前文件夹，不递归子文件夹）
     media_type = 'video' if run_mode in ('video', 'douyin') else 'image'
+    _own_shared_conn = conn is None
     try:
         from utils.db_utils import get_db, get_node_by_path, get_direct_media, sync_folder
-        shared_conn = get_db()
+        if _own_shared_conn:
+            shared_conn = get_db()
+        else:
+            shared_conn = conn
         node = get_node_by_path(shared_conn, str(folder_path))
         if node:
             rows, _ = get_direct_media(
@@ -250,7 +264,7 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
                 })
 
     finally:
-        if shared_conn:
+        if _own_shared_conn and shared_conn:
             shared_conn.close()
 
     result['total_categories'] = len(result['categories'])
@@ -258,6 +272,13 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
     # 兜底规则：只有一个分类有文件，且无根文件
     if result['total_categories'] == 1 and len(result['root_files']) == 0:
         result['single_leaf_override'] = result['categories'][0]['is_leaf']
+
+    # 缓存重定向判断结果，避免 from_override 链重复计算
+    _would_redirect_cache[str(folder_path.resolve())] = (
+        result['is_leaf']
+        or result['total_categories'] == 0
+        or (result['single_leaf_override'] and result['total_categories'] == 1)
+    )
 
     return result
 
@@ -267,23 +288,18 @@ def check_browse_would_redirect(folder_path, already_synced=None):
     检查浏览该文件夹时是否会重定向到 grid 页面。
     返回 True 表示 /category/browse/ 会触发重定向（叶子或单分类兜底），
     用于 grid 页面判断返回按钮是否会导致循环。
+    优先从缓存读取，避免 from_override 链重复计算。
     """
+    cache_key = str(Path(folder_path).resolve())
+    cached = _would_redirect_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     info = get_category_children_info(
         str(folder_path), config.RUN_MODE,
         random_mode=config.RANDOM_MODE,
         already_synced=already_synced,
     )
 
-    # 叶子节点（无子文件夹）→ grid
-    if info['is_leaf']:
-        return True
-
-    # 所有子文件夹均为空 → 同叶子处理，重定向到 grid
-    if info['total_categories'] == 0:
-        return True
-
-    # 仅有一个带文件的分类且无根文件 → 兜底重定向到 grid
-    if info.get('single_leaf_override') and info['total_categories'] == 1:
-        return True
-
-    return False
+    # _would_redirect_cache 已在 get_category_children_info 中写入
+    return _would_redirect_cache.get(cache_key, False)

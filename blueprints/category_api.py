@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify, render_template, redirect
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
-from utils.media_utils import get_category_children_info, check_browse_would_redirect
+from utils.media_utils import get_category_children_info, check_browse_would_redirect, invalidate_cache
 from blueprints.auth import login_required, require_mode
 
 category_bp = Blueprint('category', __name__, url_prefix='/category')
@@ -18,16 +18,19 @@ category_bp = Blueprint('category', __name__, url_prefix='/category')
 _scanned_folders = set()  # 已同步过的文件夹，点击刷新可清除
 
 
-def _sync_db(folder_path):
-    """同步当前文件夹到 DB，同目录只扫描一次"""
+def _sync_db(folder_path, conn=None):
+    """同步当前文件夹到 DB，同目录只扫描一次。可传入共享连接避免重复开/关。"""
     if folder_path in _scanned_folders:
         return
     try:
         if config.DB_PATH and config.MEDIA_DIR:
             from utils.db_utils import get_db, sync_folder
-            conn = get_db()
+            _own_conn = conn is None
+            if _own_conn:
+                conn = get_db()
             sync_folder(conn, folder_path)
-            conn.close()
+            if _own_conn:
+                conn.close()
             _scanned_folders.add(folder_path)
     except Exception:
         pass
@@ -45,7 +48,6 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
                 offset=offset, limit=limit,
                 sort_type=config.SORT_TYPE,
                 sort_order=config.SORT_ORDER,
-                skip_sync=True,
             )
             conn.close()
             return files, has_more
@@ -122,19 +124,24 @@ def category_browse(folder_path):
 
         folder_rel = decoded_path.replace('\\', '/')
 
-        # 手动刷新 → 清除节流阀，强制重新扫描
+        # 手动刷新 → 清除节流阀 + 缓存，强制重新扫描
         if request.args.get('refresh') == '1':
             _scanned_folders.discard(str(full_path))
+            invalidate_cache(str(full_path))
 
-        # 同步 DB 确保 per-disk 表已更新
-        _sync_db(str(full_path))
+        # 开一个连接，供 sync 和 info 查询复用
+        from utils.db_utils import get_db
+        shared_conn = get_db()
 
-        # 获取分类信息（内部已过滤空文件夹）
+        _sync_db(str(full_path), conn=shared_conn)
+
         info = get_category_children_info(
             str(full_path), config.RUN_MODE,
             random_mode=config.RANDOM_MODE,
             already_synced=_scanned_folders,
+            conn=shared_conn,
         )
+        shared_conn.close()
 
         # 兜底规则：只有一个分类有文件且无根文件 → 直接跳转到网格页面
         if info.get('single_leaf_override') and info['total_categories'] == 1:
@@ -175,17 +182,21 @@ def category_grid(folder_path):
         if not full_path.exists() or not full_path.is_dir():
             return '目录不存在', 404
 
-        # 手动刷新 → 清除节流阀，强制重新扫描
+        # 手动刷新 → 清除节流阀 + 缓存，强制重新扫描
         if request.args.get('refresh') == '1':
             _scanned_folders.discard(str(full_path))
+            invalidate_cache(str(full_path))
 
         # 同步 DB 确保 per-disk 表已更新
-        _sync_db(str(full_path))
+        from utils.db_utils import get_db
+        conn = get_db()
+        _sync_db(str(full_path), conn=conn)
 
         page_size = config.CATEGORY_DETAIL_PAGE_SIZE
         files, has_more = _get_lazy_page_files(
             str(full_path), 0, page_size, config.RUN_MODE
         )
+        conn.close()
 
         # 计算父路径
         parent_rel = os.path.relpath(str(full_path.parent), str(config.MEDIA_DIR))
