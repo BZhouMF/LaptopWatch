@@ -348,7 +348,6 @@
         content.innerHTML = html;
 
         var footer = document.getElementById('spaFooter');
-        footer.innerHTML = '';
         footer.style.display = 'none';
 
         window.scrollTo(0, 0);
@@ -427,7 +426,18 @@
         var nextBtn = document.getElementById('gridNextPage');
         var pageNumbers = document.getElementById('gridPageNumbers');
 
-        if (!prevBtn || !nextBtn || !pageNumbers) return;
+        if (!prevBtn || !nextBtn || !pageNumbers) {
+            // 分页结构被清空（如 renderCategoryView 隐藏了 footer），重建
+            var footerEl = document.getElementById('spaFooter');
+            footerEl.innerHTML = '<div class="pagination" id="gridPagination">' +
+                '<button id="gridPrevPage" class="page-btn" disabled>上一页</button>' +
+                '<div class="page-numbers" id="gridPageNumbers"></div>' +
+                '<button id="gridNextPage" class="page-btn" disabled>下一页</button>' +
+                '</div>';
+            prevBtn = document.getElementById('gridPrevPage');
+            nextBtn = document.getElementById('gridNextPage');
+            pageNumbers = document.getElementById('gridPageNumbers');
+        }
 
         prevBtn.disabled = gridCurrentPage <= 1 || gridIsLoading;
         nextBtn.disabled = !gridHasMore || gridIsLoading;
