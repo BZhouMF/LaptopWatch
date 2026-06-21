@@ -670,17 +670,7 @@
     }
 
     function renderGridSkeleton(folderName, parentPath) {
-        var headerHtml = '';
-        if (parentPath !== undefined && parentPath !== null && parentPath !== '') {
-            headerHtml += '<a href="javascript:void(0)" class="back-btn" data-spa-nav="back">&larr; 返回</a>';
-        }
-        headerHtml += '<h1>' + escHtml(folderName) + '</h1>';
-        headerHtml += '<a href="/category/grid/' + encodeURIComponent(gridFolderPath) + '?refresh=1" class="refresh-btn">刷新</a>';
-
-        var header = document.getElementById('spaHeader');
-        header.className = 'grid-header';
-        header.innerHTML = headerHtml;
-
+        renderGridHeader(folderName, gridFolderPath, parentPath);
         document.getElementById('spaContent').innerHTML = '';
         document.getElementById('spaLoading').style.display = 'block';
     }
