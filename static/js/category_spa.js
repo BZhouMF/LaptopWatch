@@ -176,10 +176,9 @@
         gridLoadPage(page, false);
     }
 
-    function navigateBack() {
+    function navigateBack(fallbackHref) {
         if (!canGoBack()) {
-            // 回到首页
-            window.location.href = '/';
+            window.location.href = fallbackHref || '/';
             return;
         }
 
@@ -562,7 +561,9 @@
             var spaNav = anchor.getAttribute('data-spa-nav');
             if (spaNav === 'back') {
                 event.preventDefault();
-                navigateBack();
+                var fallback = anchor.getAttribute('href');
+                if (fallback === 'javascript:void(0)') fallback = null;
+                navigateBack(fallback);
                 return;
             }
             if (spaNav === 'category') {
