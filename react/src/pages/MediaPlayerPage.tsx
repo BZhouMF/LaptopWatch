@@ -13,13 +13,6 @@ interface MediaData {
   is_video: boolean;
 }
 
-interface DouyinConfig {
-  autoPlay: boolean;
-  muted: boolean;
-  nativeFullscreen: boolean;
-  mode: string;
-}
-
 type PlayerStatus = "loading" | "playing" | "paused" | "ended" | "error";
 
 const SPEED_OPTIONS = [2, 1.75, 1.5, 1.25, 1, 0.75];
@@ -41,14 +34,10 @@ export default function MediaPlayerPage(): JSX.Element {
   const [search_params] = useSearchParams();
 
   // ── Mode ──────────────────────────────────────────
-  const config_ref = useRef<DouyinConfig>(
-    (window as unknown as Record<string, unknown>).DOUYIN_CONFIG as DouyinConfig || {
-      autoPlay: false, muted: false, nativeFullscreen: false, mode: "douyin",
-    }
-  );
-  const mode = config_ref.current.mode;
-  const is_grid = mode === "grid";
-  const auto_play = !is_grid && config_ref.current.autoPlay;
+  // Grid mode: a specific file path was provided via ?path= (from BrowsePage / CategoryBrowsePage)
+  // Douyin mode: no path — fetch from API feed (only works when server is in douyin mode)
+  const grid_path_param = search_params.get("path") || "";
+  const is_grid = !!grid_path_param;
 
   // ── Refs ───────────────────────────────────────────
   const container_ref = useRef<HTMLDivElement>(null);
@@ -77,7 +66,7 @@ export default function MediaPlayerPage(): JSX.Element {
   const [current_time, set_current_time] = useState(0);
   const [duration, set_duration] = useState(0);
   const [is_playing, set_is_playing] = useState(false);
-  const [is_muted, set_is_muted] = useState(config_ref.current.muted);
+  const [is_muted, set_is_muted] = useState(false);
   const [selected_speed, set_selected_speed] = useState(1);
   const [controls_visible, set_controls_visible] = useState(true);
   const [settings_open, set_settings_open] = useState(false);
@@ -312,7 +301,7 @@ export default function MediaPlayerPage(): JSX.Element {
     const on_waiting = () => { if (!video.paused) set_status("loading"); };
     const on_canplay = () => { set_status("playing"); set_is_playing(!video.paused); };
     const on_ended = () => {
-      if (auto_play) {
+      if (!is_grid) {
         handle_nav_next();
       } else {
         video.currentTime = 0;
@@ -345,7 +334,7 @@ export default function MediaPlayerPage(): JSX.Element {
       video.removeEventListener("ended", on_ended);
       video.removeEventListener("error", on_err);
     };
-  }, [auto_play, show_controls]);
+  }, [!is_grid, show_controls]);
 
   // Attach events to both video elements
   useEffect(() => {
@@ -481,21 +470,15 @@ export default function MediaPlayerPage(): JSX.Element {
   // ── Initialize ──────────────────────────────────────
   useEffect(() => {
     if (is_grid) {
-      const path = search_params.get("path") || "";
-      grid_path_ref.current = path;
-      if (!path) {
-        set_status("error");
-        set_error_msg("未指定文件路径");
-        return;
-      }
+      grid_path_ref.current = grid_path_param;
       // Determine if video by extension
-      const ext = path.split(".").pop()?.toLowerCase() || "";
+      const ext = grid_path_param.split(".").pop()?.toLowerCase() || "";
       const is_vid = ["mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v", "3gp"].includes(ext);
       grid_is_video_ref.current = is_vid;
       set_show_video(is_vid);
       const media: MediaData = {
-        relative_path: path,
-        name: decodeURIComponent(path.split("/").pop() || path),
+        relative_path: grid_path_param,
+        name: decodeURIComponent(grid_path_param.split("/").pop() || grid_path_param),
         is_video: is_vid,
       };
       set_current_media(media);
