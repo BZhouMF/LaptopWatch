@@ -28,38 +28,69 @@ LaptopWatch/
 │   ├── media_utils.py      # 媒体文件遍历工具
 │   ├── process_utils.py    # 进程/端口管理
 │   └── thumbnail_utils.py  # 缩略图生成（图片/视频）
-├── templates/              # HTML 模板
-│   ├── login.html          # 通用登录页
-│   ├── index.html          # 普通模式首页（文件夹视图）
-│   ├── browse.html         # 目录浏览模式
-│   ├── category_index.html # 分类浏览首页
-│   ├── category_grid.html  # 分类网格视图
-│   ├── media_index.html    # 媒体模式主页
-│   ├── douyin.html         # 抖音模式播放页
-│   ├── player.html         # 全屏播放器页面
+├── react/                  # React 前端（SPA）
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── HomePage.tsx            # 首页（运行模式路由分发）
+│   │   │   ├── MediaPlayerPage.tsx     # 抖音模式播放器（双缓冲滑动）
+│   │   │   ├── LoginPage.tsx           # 登录页
+│   │   │   ├── RegisterPage.tsx        # 注册页
+│   │   │   ├── BrowsePage.tsx          # 普通文件浏览
+│   │   │   ├── CategoryBrowsePage.tsx  # 分类目录浏览模式
+│   │   │   ├── TextViewerPage.tsx      # 文本查看器
+│   │   │   └── NotFoundPage.tsx        # 404 页
+│   │   ├── components/
+│   │   │   ├── MediaGrid.tsx           # 媒体网格/列表组件
+│   │   │   ├── Layout.tsx              # 页面布局
+│   │   │   ├── ProtectedRoute.tsx      # 路由守卫
+│   │   │   ├── browse/
+│   │   │   │   ├── PreviewModal.tsx    # 预览弹窗
+│   │   │   │   └── SelectionBar.tsx   # 批量选择工具栏
+│   │   │   └── player/                # 播放器子组件
+│   │   ├── hooks/
+│   │   │   └── usePlayerGestures.ts   # 手势控制 Hook
+│   │   ├── api/
+│   │   │   └── client.ts             # Axios API 客户端
+│   │   ├── contexts/
+│   │   │   └── AuthContext.tsx        # 认证上下文
+│   │   └── test/                     # 前端测试（vitest + jsdom）
+│   │       ├── setup.ts
+│   │       ├── usePlayerGestures.test.ts
+│   │       ├── client.test.ts
+│   │       ├── App.test.tsx
+│   │       ├── HomePage.test.tsx
+│   │       ├── Layout.test.tsx
+│   │       ├── LoginPage.test.tsx
+│   │       ├── MediaGrid.test.tsx
+│   │       ├── NotFoundPage.test.tsx
+│   │       ├── PreviewModal.test.tsx
+│   │       ├── ProtectedRoute.test.tsx
+│   │       ├── RegisterPage.test.tsx
+│   │       └── SelectionBar.test.tsx
+│   ├── vite.config.ts
+│   ├── vitest.config.ts
+│   ├── package.json
+│   └── dist/                         # 构建产物（由 Flask serve）
+├── templates/              # HTML 模板（Flask 直出的页面）
 │   ├── setup.html          # 管理后台页面
-│   ├── qid.html            # QID 管理控制台
-│   ├── text_viewer.html    # 文本查看器
-│   └── unpage.html         # 路径不存在错误页
-├── static/                 # 静态文件
+│   └── qid.html            # QID 管理控制台
+├── static/                 # 静态文件（非 React 构建产物）
 │   ├── css/
-│   │   ├── style.css       # 主样式
 │   │   └── setup.css       # 管理后台样式
 │   └── js/
-│       ├── script.js       # 普通模式脚本
-│       ├── browse.js       # 目录浏览脚本
-│       ├── Video_Player.js # 视频/抖音播放器
-│       ├── modal.js        # 模态预览窗口
-│       ├── media_index.js  # 媒体模式首页
-│       ├── setup.js        # 管理后台脚本
-│       └── utils.js        # 前端工具函数
-└── test/                   # 测试
+│       └── setup.js        # 管理后台脚本
+└── test/                   # 后端测试（pytest，211 用例）
     ├── conftest.py         # pytest 配置
+    ├── test_auth.py
     ├── test_cache_models.py
     ├── test_category_api.py
+    ├── test_core_api.py
     ├── test_cover.py
     ├── test_db_utils.py
     ├── test_douyin_api.py
+    ├── test_douyin_live.py        # 抖音模式端到端测试
+    ├── test_file_api.py
+    ├── test_file_utils.py
     ├── test_gui_fixes.py
     ├── test_media_api.py
     ├── test_media_utils.py
@@ -71,7 +102,7 @@ LaptopWatch/
 
 ## 架构说明
 
-项目采用 **双服务器 + 管理后台** 架构，共使用 3 个端口：
+前端采用 **React + TypeScript + Vite** 构建的 SPA（单页应用），打包后由 Flask 直接 serve。后端采用 **双服务器 + 管理后台** 架构，共使用 3 个端口：
 
 ### 端口总览
 
@@ -223,13 +254,15 @@ python app.py
 
 ### 抖音模式
 - 上下滑动切换视频，仿抖音交互体验
-- 双视频缓冲无缝切换（350ms 滑动过渡）
-- 智能预加载：播放时后台加载下一个视频
+- 双视频缓冲无缝切换（350ms CSS transition 滑动过渡）
+- 两阶段动画状态机：start → animating，防 timeupdate 重渲染打断
+- 智能预加载：播放完成后立即后台请求下一个视频
 - 全屏手势控制：左侧调节亮度，右侧调节音量
 - 水平滑动快进快退，带时间指示器
 - 倍速播放（0.5x / 1x / 1.5x / 2x / 3x）
-- 随机媒体推送模式
-- 播放历史记录与反重复机制
+- 随机媒体推送（SQL ORDER BY RANDOM() 真随机）
+- 播放历史记录与反重复机制（最多 200 条）
+- 长按倍速播放
 
 ### 目录浏览模式
 - 卡片式分类展示，按文件夹分组
@@ -257,17 +290,37 @@ python app.py
 - 自动生成访问二维码
 - 会话日志记录与导出
 
-## 测试
+## 开发
+
+### React 前端
 
 ```bash
-# 安装测试依赖
-pip install pytest
+cd react
 
-# 运行全部测试
-python -m pytest test/
+# 安装依赖
+npm install
+
+# 开发模式（热更新）
+npm run dev
+
+# 生产构建
+npm run build
+
+# 运行前端测试
+npx vitest run
+```
+
+### 后端
+
+```bash
+# 安装依赖
+pip install -r requirements.txt
+
+# 运行全部后端测试（211 用例）
+python -m pytest test/ -v
 
 # 运行特定测试文件
-python -m pytest test/test_media_api.py -v
+python -m pytest test/test_douyin_api.py -v
 ```
 
 ## 注意事项
