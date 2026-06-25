@@ -95,7 +95,7 @@ export default function TextViewerPage() {
   if (is_loading) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-500" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
       </div>
     );
   }
@@ -103,7 +103,7 @@ export default function TextViewerPage() {
   if (error || !state) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-zinc-500">{error || "文件不存在"}</p>
+        <p className="text-text-muted">{error || "文件不存在"}</p>
       </div>
     );
   }
@@ -112,40 +112,40 @@ export default function TextViewerPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-5 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <header className="flex items-center justify-between border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-5 py-3">
         <div className="flex items-center gap-4 min-w-0">
-          <h1 className="text-base font-medium text-zinc-800 truncate dark:text-zinc-100">
+          <h1 className="text-base font-medium text-text-primary truncate">
             {state.filename}
           </h1>
-          <span className="shrink-0 text-xs text-zinc-400">编码: {state.encoding}</span>
+          <span className="shrink-0 text-xs text-text-muted">编码: {state.encoding}</span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={handle_download}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-lg border border-border-primary px-3 py-1.5 text-xs text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
           >
             下载文件
           </button>
           <button
             onClick={handle_copy}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 transition hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-lg border border-border-primary px-3 py-1.5 text-xs text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
           >
             {is_copied ? "已复制" : "复制内容"}
           </button>
           <button
             onClick={() => navigate(-1)}
-            className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-indigo-600"
+            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:bg-accent-hover"
           >
             返回
           </button>
         </div>
       </header>
 
-      <div className="flex-1 overflow-auto bg-zinc-50 dark:bg-zinc-950">
-        <pre className="p-5 text-sm leading-relaxed text-zinc-800 dark:text-zinc-200 font-mono whitespace-pre-wrap break-all">
+      <div className="flex-1 overflow-auto bg-bg-primary">
+        <pre className="p-5 text-sm leading-relaxed text-text-primary font-mono whitespace-pre-wrap break-all">
 {state.content.split("\n").map((line, index) => (
             <span key={index} className="flex">
-              <span className="select-none shrink-0 w-12 text-right pr-4 text-zinc-300 dark:text-zinc-600">
+              <span className="select-none shrink-0 w-12 text-right pr-4 text-text-muted">
                 {index + 1}
               </span>
               <span>{line}</span>
@@ -154,7 +154,7 @@ export default function TextViewerPage() {
         </pre>
       </div>
 
-      <footer className="border-t border-zinc-200 bg-white px-5 py-2 text-xs text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950">
+      <footer className="border-t border-border-primary bg-bg-secondary/80 backdrop-blur px-5 py-2 text-xs text-text-muted">
         文件大小: {state.file_size} | 总行数: {line_count}
       </footer>
     </div>

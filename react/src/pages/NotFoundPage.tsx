@@ -35,14 +35,14 @@ export default function NotFoundPage() {
   }, [navigate]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950 p-5">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-10 text-center shadow-lg dark:bg-zinc-900">
-        <div className="mb-5 text-5xl text-red-400">&#x2716;</div>
-        <h2 className="mb-2 text-2xl font-bold text-red-500">路径不存在</h2>
-        <p className="mb-8 text-base text-zinc-500 dark:text-zinc-400">
+    <div className="flex min-h-screen items-center justify-center bg-bg-primary p-5">
+      <div className="w-full max-w-sm card rounded-xl p-10 text-center">
+        <div className="mb-5 text-5xl text-danger">&#x2716;</div>
+        <h2 className="mb-2 text-2xl font-bold text-danger">路径不存在</h2>
+        <p className="mb-8 text-base text-text-muted">
           您访问的文件夹可能已被删除或移动
         </p>
-        <p className="text-sm text-zinc-400">
+        <p className="text-sm text-text-muted">
           {seconds > 0 ? `${seconds} 秒后自动返回上一页...` : "正在跳转..."}
         </p>
       </div>

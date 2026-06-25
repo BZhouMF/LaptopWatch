@@ -1,31 +1,51 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════
+   Bilibili-style Design System
+   Core: #FB7299 (B站粉) on light backgrounds
+   ═══════════════════════════════════════════════════ */
+
 @theme {
-  --color-bg-primary: #0a0a0f;
-  --color-bg-secondary: #13131a;
-  --color-bg-card: #18181f;
-  --color-bg-card-hover: #1e1e28;
-  --color-bg-elevated: #1f1f2a;
-  --color-border-primary: #252530;
-  --color-border-secondary: #2a2a36;
-  --color-text-primary: #f0f0f5;
-  --color-text-secondary: #a0a0b0;
-  --color-text-muted: #6b6b7a;
-  --color-accent: #818cf8;
-  --color-accent-hover: #a5b4fc;
-  --color-accent-subtle: #818cf815;
-  --color-accent-border: #818cf830;
-  --color-success: #34d399;
-  --color-danger: #f87171;
-  --color-warning: #fbbf24;
+  /* ── Background ─────────────────────────────── */
+  --color-bg-primary: #f4f5f7;
+  --color-bg-secondary: #ffffff;
+  --color-bg-card: #ffffff;
+  --color-bg-card-hover: #f0f1f4;
+  --color-bg-elevated: #ffffff;
+
+  /* ── Border ─────────────────────────────────── */
+  --color-border-primary: #e3e5e8;
+  --color-border-secondary: #eaecef;
+
+  /* ── Text ───────────────────────────────────── */
+  --color-text-primary: #18191c;
+  --color-text-secondary: #61666d;
+  --color-text-muted: #9499a0;
+
+  /* ── Brand / Accent ─────────────────────────── */
+  --color-accent: #fb7299;
+  --color-accent-hover: #fc8bab;
+  --color-accent-subtle: #fb729912;
+  --color-accent-border: #fb729930;
+  --color-accent-light: #fff0f4;
+
+  /* ── Semantic ───────────────────────────────── */
+  --color-success: #52c41a;
+  --color-danger: #f45d5d;
+  --color-warning: #ff9f43;
 }
 
+/* ── Base ─────────────────────────────────────────── */
 body {
-  background: #0a0a0f;
-  color: #f0f0f5;
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #f4f5f7;
+  color: #18191c;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 /* ── Custom scrollbar ──────────────────────────────── */
@@ -37,33 +57,26 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2a36;
+  background: #c9cdd4;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a48;
+  background: #a8adb5;
 }
 
-/* ── Glass card utility ────────────────────────────── */
-.glass-card {
-  background: #18181fcc;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid #252530;
+/* ── Card base ─────────────────────────────────────── */
+.card {
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #e3e5e8;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
 
-/* ── Skeleton loading animation ────────────────────── */
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-.skeleton {
-  background: linear-gradient(90deg, #18181f 25%, #22222e 50%, #18181f 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-
-/* ── Fade in animation ─────────────────────────────── */
+/* ── Animations ────────────────────────────────────── */
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -72,11 +85,20 @@ body {
   animation: fade-in 0.2s ease-out;
 }
 
-/* ── Slide up animation ────────────────────────────── */
 @keyframes slide-up {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-slide-up {
   animation: slide-up 0.3s ease-out;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #f0f1f4 25%, #e8e9ec 50%, #f0f1f4 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
 }
