@@ -15,9 +15,8 @@ normal_bp = Blueprint('normal_api', __name__, url_prefix='/api')
 
 @normal_bp.route('/check_path', methods=['GET'])
 @login_required
-@require_mode('normal')
 def api_check_path():
-    """检查路径是否存在"""
+    """检查路径是否存在（全模式可用，用于前端认证验证）"""
     start_time = time.time()
     try:
         path = request.args.get('path', '')

@@ -12,26 +12,37 @@ from utils.logging_utils import log_access, log_exception
 auth_bp = Blueprint('auth', __name__)
 
 def login_required(f):
-    """登录要求装饰器"""
+    """登录要求装饰器：API请求返回401 JSON，页面请求重定向"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not session.get('logged_in'):
+            if _is_api_request():
+                return jsonify({'code': 1, 'msg': '未登录'}), 401
             return redirect(url_for('auth.login'))
         return f(*args, **kwargs)
     return decorated_function
 
 
 def require_mode(*modes):
-    """模式限制装饰器，模式不匹配时重定向到首页"""
+    """模式限制装饰器：API请求返回403 JSON，页面请求重定向"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if config.RUN_MODE not in modes:
+                if _is_api_request():
+                    return jsonify({'code': 1, 'msg': '当前模式不支持此接口'}), 403
                 from flask import redirect
                 return redirect('/')
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+
+def _is_api_request():
+    """判断是否为 API 请求（返回 JSON 而非重定向）"""
+    from flask import request
+    api_prefixes = ('/api/', '/media/', '/file/', '/category/')
+    return any(request.path.startswith(p) for p in api_prefixes)
 
 def _get_stored_password():
     """从 DB 获取密码哈希和盐值，首次自动建表并种子默认密码"""
