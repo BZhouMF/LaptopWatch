@@ -38,6 +38,11 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
   const page_cache = useRef<PageCache>({});
   const abort_ref = useRef<AbortController | null>(null);
 
+  // Invalidate cache when page size props change
+  useEffect(() => {
+    page_cache.current = {};
+  }, [page_first, page_load, is_random]);
+
   const load_page = useCallback(
     async (page: number) => {
       if (page_cache.current[page]) {
@@ -77,9 +82,15 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
         set_items(data.data);
         set_has_more(data.has_more);
         set_current_page(page);
-        if (!is_random && data.total > 0) {
+        if (is_random && data.total > 0) {
           const tp = Math.ceil(data.total / page_load);
           set_total_pages(Math.max(tp, page));
+        } else if (!is_random) {
+          // Backend doesn't return total for non-random mode, infer from has_more
+          set_total_pages((prev) => {
+            if (data.has_more) return Math.max(prev, page + 1);
+            return Math.max(prev, page);
+          });
         }
         window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (err: unknown) {
@@ -94,7 +105,7 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
   useEffect(() => {
     load_page(1);
     return () => abort_ref.current?.abort();
-  }, []);
+  }, [load_page]);
 
   const handle_prev = useCallback(() => {
     if (current_page > 1 && !is_loading) load_page(current_page - 1);
@@ -196,8 +207,8 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
         )}
       </div>
 
-      {/* Pagination */}
-      {items.length > 0 && (total_pages > 1 || has_more) && (
+      {/* Pagination — show whenever there are items and more than one page worth */}
+      {items.length > 0 && (total_pages > 1 || has_more || current_page > 1) && (
         <div className="flex items-center justify-center gap-1.5 border-t border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
           <button
             onClick={handle_prev}
