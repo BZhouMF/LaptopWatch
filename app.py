@@ -152,11 +152,29 @@ def handle_unhandled_exception(e):
 
     return "服务器内部错误", 500
 
+# ==================== React SPA 静态资源 ====================
+@app.route('/assets/<path:filename>')
+def serve_react_assets(filename):
+    """Serve React built static assets (JS/CSS)"""
+    from flask import send_from_directory
+    assets_dir = config.REACT_DIST_DIR / 'assets'
+    if assets_dir.is_dir():
+        return send_from_directory(str(assets_dir), filename)
+    return '', 404
+
+
 # ==================== 404错误处理器 ====================
 @app.errorhandler(404)
 def handle_not_found(e):
-    """处理404错误"""
-    from flask import request
+    """处理404错误：API返回JSON，页面请求返回React SPA入口"""
+    from flask import request, send_file
+    api_prefixes = ('/api/', '/media/', '/file/', '/category/', '/login', '/logout', '/register')
+    if any(request.path.startswith(p) for p in api_prefixes):
+        logger.debug(f"404 Not Found (API): {request.path}")
+        return jsonify({'code': 1, 'msg': '请求的资源不存在'}), 404
+    react_index = config.REACT_DIST_DIR / 'index.html'
+    if react_index.is_file():
+        return send_file(str(react_index))
     logger.debug(f"404 Not Found: {request.path}")
     return jsonify({'code': 1, 'msg': '请求的资源不存在'}), 404
 

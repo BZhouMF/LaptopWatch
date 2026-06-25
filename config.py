@@ -115,6 +115,10 @@ class Config:
     def STATIC_URL_PATH(self):
         return '/static'
 
+    @property
+    def REACT_DIST_DIR(self):
+        return self.BASE_PATH / 'react' / 'dist'
+
     _db_path_override = None
 
     @property
