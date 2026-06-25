@@ -246,7 +246,10 @@ export default function BrowsePage() {
 
   const handle_go_back = useCallback(async () => {
     const history: string[] = JSON.parse(localStorage.getItem("fileHistory") || "[]");
+    // Remove current path
     history.pop();
+    localStorage.setItem("fileHistory", JSON.stringify(history));
+
     while (history.length > 0) {
       const candidate = history.pop()!;
       try {
@@ -254,11 +257,14 @@ export default function BrowsePage() {
           params: { path: candidate },
         });
         if (resp.data.exists && resp.data.is_dir) {
+          // Persist trimmed history before navigating so the effect won't push duplicates
+          localStorage.setItem("fileHistory", JSON.stringify(history));
           navigate(`/browse/${encodeURIComponent(candidate)}`);
           return;
         }
       } catch { /* try next */ }
     }
+    localStorage.removeItem("fileHistory");
     navigate("/");
   }, [navigate]);
 
