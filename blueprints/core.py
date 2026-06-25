@@ -212,6 +212,18 @@ def api_drives():
     return {'drives': get_drives()}
 
 
+@core_bp.route('/api/mode', methods=['GET'])
+def api_mode():
+    """返回当前运行模式及配置"""
+    return {
+        'run_mode': config.RUN_MODE,
+        'category_browse': config.CATEGORY_BROWSE,
+        'random_mode': config.RANDOM_MODE,
+        'page_first': config.PAGE_FIRST,
+        'page_load': config.PAGE_LOAD,
+    }
+
+
 @core_bp.route('/favicon.ico', methods=['GET'])
 def favicon():
     """空favicon响应"""

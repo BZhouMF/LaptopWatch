@@ -6,6 +6,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import HomePage from "./pages/HomePage";
 import BrowsePage from "./pages/BrowsePage";
+import CategoryBrowsePage from "./pages/CategoryBrowsePage";
 import MediaPlayerPage from "./pages/MediaPlayerPage";
 import TextViewerPage from "./pages/TextViewerPage";
 import NotFoundPage from "./pages/NotFoundPage";
@@ -19,6 +20,7 @@ export default function AppRouter(): JSX.Element {
         <Route element={<Layout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/browse/*" element={<BrowsePage />} />
+          <Route path="/category/*" element={<CategoryBrowsePage />} />
           <Route path="/media/player" element={<MediaPlayerPage />} />
           <Route path="/file/text/*" element={<TextViewerPage />} />
         </Route>
