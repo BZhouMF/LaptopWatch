@@ -220,7 +220,7 @@ def api_thumbnail(relative_path):
 
 @media_bp.route('/serve_media/', methods=['GET'])
 @login_required
-@require_mode('video', 'image', 'douyin')
+@require_mode('video', 'image', 'douyin', 'normal')
 def serve_media_empty():
     """处理空的媒体文件请求"""
     from flask import jsonify
@@ -290,12 +290,13 @@ def _stream_video_file(filepath, range_header, mimetype, environ):
 
 @media_bp.route('/serve_media/<path:relative_path>', methods=['GET'])
 @login_required
-@require_mode('video', 'image', 'douyin')
+@require_mode('video', 'image', 'douyin', 'normal')
 def serve_media(relative_path):
     """提供媒体文件流"""
     start_time = time.time()
     try:
         from utils.logging_utils import logger
+        from pathlib import Path
         # 解码URL路径以处理特殊字符
         decoded_relative_path = urllib.parse.unquote(relative_path)
 
@@ -304,19 +305,25 @@ def serve_media(relative_path):
             decoded_relative_path = decoded_relative_path[1:]
             logger.debug(f"去除前导斜杠后的路径: {decoded_relative_path}")
 
-        if not config.MEDIA_DIR or not config.MEDIA_DIR.exists():
-            logger.warning(f"媒体目录不存在: {config.MEDIA_DIR}")
-            return '媒体目录不存在', 404
-        requested_path = config.MEDIA_DIR / decoded_relative_path
-        target = requested_path.resolve()
-        if not str(target).startswith(str(config.MEDIA_DIR.resolve())):
-            from utils.logging_utils import logger
-            logger.warning(f"非法访问尝试: {target} | IP: {request.remote_addr}")
-            return '非法访问', 403
-        if not target.is_file():
-            from utils.logging_utils import logger
-            logger.warning(f"文件不存在: {target} | IP: {request.remote_addr}")
-            return '文件不存在', 404
+        # 判断是否为绝对路径（普通模式：BrowsePage 传入 Windows 盘符路径 或 Unix 绝对路径）
+        path_obj = Path(decoded_relative_path)
+        if path_obj.is_absolute():
+            target = path_obj.resolve()
+            if not target.is_file():
+                logger.warning(f"文件不存在: {target} | IP: {request.remote_addr}")
+                return '文件不存在', 404
+        else:
+            if not config.MEDIA_DIR or not config.MEDIA_DIR.exists():
+                logger.warning(f"媒体目录不存在: {config.MEDIA_DIR}")
+                return '媒体目录不存在', 404
+            requested_path = config.MEDIA_DIR / decoded_relative_path
+            target = requested_path.resolve()
+            if not str(target).startswith(str(config.MEDIA_DIR.resolve())):
+                logger.warning(f"非法访问尝试: {target} | IP: {request.remote_addr}")
+                return '非法访问', 403
+            if not target.is_file():
+                logger.warning(f"文件不存在: {target} | IP: {request.remote_addr}")
+                return '文件不存在', 404
 
         # 首次访问时记录到日志（相对路径，精简格式）
         ext = os.path.splitext(target.name)[1].lower()
@@ -345,33 +352,41 @@ def serve_media(relative_path):
 
 @media_bp.route('/download_media/<path:relative_path>', methods=['GET'])
 @login_required
-@require_mode('video', 'image', 'douyin')
+@require_mode('video', 'image', 'douyin', 'normal')
 def download_media(relative_path):
     """下载媒体文件"""
     start_time = time.time()
     try:
+        from pathlib import Path
         # 解码URL路径以处理特殊字符
         decoded_relative_path = urllib.parse.unquote(relative_path)
 
-        if not config.MEDIA_DIR:
-            return '接口不可用', 404
-        try:
-            requested_path = config.MEDIA_DIR / decoded_relative_path
-            target = requested_path.resolve()
-            if not str(target).startswith(str(config.MEDIA_DIR.resolve())):
-                return '非法访问', 403
+        # 判断是否为绝对路径（普通模式）
+        path_obj = Path(decoded_relative_path)
+        if path_obj.is_absolute():
+            target = path_obj.resolve()
             if not target.is_file():
                 return '文件不存在', 404
+        else:
+            if not config.MEDIA_DIR:
+                return '接口不可用', 404
+            try:
+                requested_path = config.MEDIA_DIR / decoded_relative_path
+                target = requested_path.resolve()
+                if not str(target).startswith(str(config.MEDIA_DIR.resolve())):
+                    return '非法访问', 403
+                if not target.is_file():
+                    return '文件不存在', 404
+            except Exception as e:
+                from utils.logging_utils import logger
+                logger.exception("download_media 异常")
+                return f'下载错误: {str(e)}', 500
 
-            log_access(request, 'DOWNLOAD_MEDIA', decoded_relative_path.replace('\\', '/'))
+        log_access(request, 'DOWNLOAD_MEDIA', decoded_relative_path.replace('\\', '/'))
 
-            directory = target.parent
-            filename = target.name
-            return send_from_directory(directory, filename, as_attachment=True)
-        except Exception as e:
-            from utils.logging_utils import logger
-            logger.exception("download_media 异常")
-            return f'下载错误: {str(e)}', 500
+        directory = target.parent
+        filename = target.name
+        return send_from_directory(str(directory), filename, as_attachment=True)
     except Exception as e:
         log_exception(request, 'DOWNLOAD_MEDIA', relative_path, e)
         return "下载失败", 500
