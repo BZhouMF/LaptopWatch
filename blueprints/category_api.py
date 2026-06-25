@@ -2,14 +2,12 @@
 目录浏览模式API蓝图
 提供分类区块展示接口
 """
-import os
 import time
 import urllib.parse
-from pathlib import Path
-from flask import Blueprint, request, jsonify, render_template, redirect
+from flask import Blueprint, request, jsonify
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
-from utils.media_utils import get_category_children_info, check_browse_would_redirect, invalidate_cache
+from utils.media_utils import get_category_children_info
 from blueprints.auth import login_required, require_mode
 
 category_bp = Blueprint('category', __name__, url_prefix='/category')
@@ -94,151 +92,6 @@ def category_data():
         return jsonify({'code': 1, 'msg': str(e)}), 500
     finally:
         log_access(request, 'CATEGORY_DATA', request.args.get('path', ''),
-                   duration=time.time() - start_time)
-
-
-@category_bp.route('/browse/<path:folder_path>', methods=['GET'])
-@login_required
-@require_mode('video', 'image')
-def category_browse(folder_path):
-    """
-    进入子文件夹。
-    如果有子文件夹 → 渲染分类页面
-    如果是叶子 → 跳转到网格页面
-    """
-    start_time = time.time()
-    try:
-        decoded_path = urllib.parse.unquote(folder_path)
-        full_path = (config.MEDIA_DIR / decoded_path).resolve()
-
-        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
-            return '非法访问', 403
-        if not full_path.exists() or not full_path.is_dir():
-            return '目录不存在', 404
-
-        # 计算父路径用于返回按钮
-        parent_rel = os.path.relpath(str(full_path.parent), str(config.MEDIA_DIR))
-        parent_path = parent_rel.replace('\\', '/')
-        if parent_path == '.':
-            parent_path = ''
-
-        folder_rel = decoded_path.replace('\\', '/')
-
-        # 手动刷新 → 清除节流阀 + 缓存，强制重新扫描
-        if request.args.get('refresh') == '1':
-            _scanned_folders.discard(str(full_path))
-            invalidate_cache(str(full_path))
-
-        # 开一个连接，供 sync 和 info 查询复用
-        from utils.db_utils import get_db
-        shared_conn = get_db()
-
-        _sync_db(str(full_path), conn=shared_conn)
-
-        info = get_category_children_info(
-            str(full_path), config.RUN_MODE,
-            random_mode=config.RANDOM_MODE,
-            already_synced=_scanned_folders,
-            conn=shared_conn,
-        )
-        shared_conn.close()
-
-        # 兜底规则：只有一个分类有文件且无根文件 → 直接跳转到网格页面
-        if info.get('single_leaf_override') and info['total_categories'] == 1:
-            only_cat = info['categories'][0]
-            return redirect(f'/category/grid/{only_cat["path"]}?from_override=1')
-
-        # 有非空子文件夹 → 分类页面
-        if info['total_categories'] > 0:
-            return render_template('category_index.html',
-                                   view_type='category',
-                                   category_info=info,
-                                   parent_path=parent_path,
-                                   current_path=folder_rel,
-                                   is_homepage=False)
-
-        # 叶子或所有子文件夹均无媒体文件 → 网格页面
-        return redirect(f'/category/grid/{folder_rel}?from_override=1')
-
-    except Exception as e:
-        logger.error(f"category_browse 错误: {e}", exc_info=True)
-        return '加载失败', 500
-    finally:
-        log_access(request, 'CATEGORY_BROWSE', folder_path,
-                   duration=time.time() - start_time)
-
-
-@category_bp.route('/grid/<path:folder_path>', methods=['GET'])
-@login_required
-@require_mode('video', 'image')
-def category_grid(folder_path):
-    """叶子文件夹的网格页面（36 个/页）"""
-    start_time = time.time()
-    try:
-        decoded_path = urllib.parse.unquote(folder_path)
-        full_path = (config.MEDIA_DIR / decoded_path).resolve()
-
-        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
-            return '非法访问', 403
-        if not full_path.exists() or not full_path.is_dir():
-            return '目录不存在', 404
-
-        # 手动刷新 → 清除节流阀 + 缓存，强制重新扫描
-        if request.args.get('refresh') == '1':
-            _scanned_folders.discard(str(full_path))
-            invalidate_cache(str(full_path))
-
-        # 同步 DB 确保 per-disk 表已更新
-        from utils.db_utils import get_db
-        conn = get_db()
-        _sync_db(str(full_path), conn=conn)
-
-        page_size = config.PAGE_FIRST
-        files, has_more = _get_lazy_page_files(
-            str(full_path), 0, page_size, config.RUN_MODE
-        )
-        conn.close()
-
-        # 计算父路径
-        parent_rel = os.path.relpath(str(full_path.parent), str(config.MEDIA_DIR))
-        parent_path = parent_rel.replace('\\', '/')
-        if parent_path == '.':
-            parent_path = ''
-
-        # 来自兜底/叶子重定向时，向上查找第一个不会触发循环的父级
-        hide_back = False
-        if request.args.get('from_override', '0') == '1':
-            check_path = full_path.parent
-            while True:
-                if str(check_path.resolve()) == str(config.MEDIA_DIR.resolve()):
-                    parent_path = ''
-                    if check_browse_would_redirect(config.MEDIA_DIR, already_synced=_scanned_folders):
-                        hide_back = True
-                    break
-
-                if check_browse_would_redirect(check_path, already_synced=_scanned_folders):
-                    check_path = check_path.parent
-                else:
-                    parent_rel = os.path.relpath(str(check_path), str(config.MEDIA_DIR))
-                    parent_path = parent_rel.replace('\\', '/')
-                    if parent_path == '.':
-                        parent_path = ''
-                    break
-
-        return render_template('category_index.html',
-                               view_type='grid',
-                               files=files,
-                               folder_name=full_path.name,
-                               folder_path=decoded_path.replace('\\', '/'),
-                               parent_path=parent_path,
-                               hide_back=hide_back,
-                               page_size=page_size,
-                               has_more=has_more)
-    except Exception as e:
-        logger.error(f"category_grid 错误: {e}", exc_info=True)
-        return '加载失败', 500
-    finally:
-        log_access(request, 'CATEGORY_GRID', folder_path,
                    duration=time.time() - start_time)
 
 

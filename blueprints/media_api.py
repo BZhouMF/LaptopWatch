@@ -7,7 +7,7 @@ import re
 import time
 import socket
 import urllib.parse
-from flask import Blueprint, request, jsonify, send_from_directory, session, render_template, Response
+from flask import Blueprint, request, jsonify, send_from_directory, session, Response
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
 from utils.media_utils import get_files_in_folder
@@ -434,40 +434,3 @@ def api_media_navigate():
         log_access(request, 'MEDIA_NAV', locals().get('current_path', ''), locals().get('direction', ''), duration=time.time() - start_time)
 
 
-@media_bp.route('/player', methods=['GET'])
-@login_required
-@require_mode('video', 'image')
-def media_player():
-    """
-    全屏媒体播放器页面（目录浏览模式专用）
-    使用与抖音模式同款的播放器 UI 和交互。
-    """
-    start_time = time.time()
-    try:
-        media_path = request.args.get('path', '')
-        if not media_path:
-            return '缺少参数', 400
-
-        decoded_path = urllib.parse.unquote(media_path)
-        if decoded_path.startswith('/'):
-            decoded_path = decoded_path[1:]
-
-        full_path = (config.MEDIA_DIR / decoded_path).resolve()
-        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
-            return '非法访问', 403
-        if not full_path.is_file():
-            return '文件不存在', 404
-
-        ext = full_path.suffix.lower()
-        is_video = ext in config.VIDEO_EXT
-
-        return render_template('player.html',
-                               media_path=decoded_path.replace('\\', '/'),
-                               media_name=full_path.name,
-                               is_video=is_video,
-                               native_fullscreen=config.NATIVE_FULLSCREEN)
-    except Exception as e:
-        logger.error(f"player 错误: {e}", exc_info=True)
-        return '加载失败', 500
-    finally:
-        log_access(request, 'PLAYER', request.args.get('path', ''), duration=time.time() - start_time)

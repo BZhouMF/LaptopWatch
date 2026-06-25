@@ -7,10 +7,10 @@ import time
 import tempfile
 import zipfile
 import urllib.parse
-from flask import Blueprint, request, jsonify, render_template, send_file, after_this_request
+from flask import Blueprint, request, send_file, after_this_request
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
-from utils.file_utils import safe_send_file, sizeof_fmt
+from utils.file_utils import safe_send_file
 from blueprints.auth import login_required, require_mode
 
 file_bp = Blueprint('file_api', __name__, url_prefix='/file')
@@ -67,53 +67,6 @@ def view_file(filepath):
         # 使用绝对路径记录耗时
         abs_path = os.path.abspath(urllib.parse.unquote(filepath)) if 'filepath' in locals() else filepath
         log_access(request, 'DOWNLOAD_ABS', abs_path, duration=time.time() - start_time)
-
-@file_bp.route('/text/<path:filepath>', methods=['GET'])
-@login_required
-@require_mode('normal')
-def view_text_file(filepath):
-    """文本文件查看"""
-    start_time = time.time()
-    try:
-        abs_path, error, code = _resolve_file_path(filepath)
-        if error:
-            return error, code
-        if os.path.getsize(abs_path) > 1024 * 1024:
-            return "文件过大", 400
-        encodings = ['utf-8', 'gbk', 'gb2312', 'latin-1']
-        content = None
-        used_encoding = None
-        for enc in encodings:
-            try:
-                with open(abs_path, 'r', encoding=enc) as f:
-                    content = f.read()
-                    used_encoding = enc
-                    break
-            except UnicodeDecodeError:
-                continue
-            except Exception as e:
-                return f"读取失败: {e}", 500
-        if content is None:
-            return "无法识别编码", 400
-
-        decoded_filepath = urllib.parse.unquote(filepath)
-
-        # 记录查看文本文件的绝对路径
-        log_access(request, 'VIEW_TEXT_ABS', abs_path, details=f"原始路径: {filepath}")
-
-        return render_template('text_viewer.html',
-                               filename=os.path.basename(abs_path),
-                               content=content,
-                               encoding=used_encoding,
-                               filepath=urllib.parse.quote(decoded_filepath.replace(os.sep, '/')),
-                               file_size=sizeof_fmt(os.path.getsize(abs_path)))
-    except Exception as e:
-        log_exception(request, 'VIEW_TEXT', filepath, e)
-        return "文本查看失败", 500
-    finally:
-        # 使用绝对路径记录耗时
-        abs_path = os.path.abspath(urllib.parse.unquote(filepath)) if 'filepath' in locals() else filepath
-        log_access(request, 'VIEW_TEXT_ABS', abs_path, duration=time.time() - start_time)
 
 @file_bp.route('/download_folder', methods=['GET'])
 @login_required

@@ -59,12 +59,17 @@ export default function RegisterPage() {
       form_data.append("account", account);
       form_data.append("password", password);
       form_data.append("confirm_password", confirm_password);
-      await api_client.post("/register", form_data, {
+      const resp = await api_client.post("/register", form_data, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
+      if (resp.data?.code !== 0) {
+        set_server_error(resp.data?.msg || "注册失败");
+        return;
+      }
       navigate("/login", { replace: true });
-    } catch {
-      set_server_error("注册失败");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { msg?: string } } })?.response?.data?.msg;
+      set_server_error(msg || "注册失败");
     } finally {
       set_is_loading(false);
     }

@@ -5,7 +5,7 @@
 import os
 import time
 from functools import wraps
-from flask import Blueprint, make_response, render_template, request, session, redirect, url_for
+from flask import Blueprint, jsonify, request, session, redirect, url_for
 from config import config
 from utils.logging_utils import log_access, log_exception
 
@@ -61,47 +61,31 @@ def _get_stored_password():
         return None, None
 
 
-@auth_bp.route('/login', methods=['GET', 'POST'])
+@auth_bp.route('/login', methods=['POST'])
 def login():
-    """登录页面 — 已登录用户自动跳转首页，避免浏览器回退到登录页"""
+    """登录 — JSON 响应"""
     start_time = time.time()
     try:
-        # 已登录用户直接进首页，防止手机回退按钮回到登录页
-        if request.method == 'GET' and session.get('logged_in'):
-            return redirect(url_for('core.index'))
+        account = request.form.get('account', '')
+        password = request.form.get('password', '')
 
-        if request.method == 'POST':
-            account = request.form.get('account', '')
-            password = request.form.get('password', '')
+        db_pwd_hash, db_salt = _get_stored_password()
+        if not db_pwd_hash or not db_salt:
+            log_exception(request, 'LOGIN', '', Exception('无法读取密码数据库'))
+            return jsonify({'code': 1, 'msg': '系统错误：无法读取密码数据库'}), 500
 
-            # 从 DB 获取哈希值（首次自动创建 DB + 种子默认密码 123456）
-            db_pwd_hash, db_salt = _get_stored_password()
-            if not db_pwd_hash or not db_salt:
-                log_exception(request, 'LOGIN', '', Exception('无法读取密码数据库'))
-                return render_template('login.html', error='系统错误：无法读取密码数据库')
+        import hashlib
+        input_hash = hashlib.sha256((password + db_salt).encode('utf-8')).hexdigest()
+        if input_hash != db_pwd_hash:
+            log_access(request, 'LOGIN', '', f'账号 {account} 密码错误')
+            return jsonify({'code': 1, 'msg': '密码错误'}), 401
 
-            import hashlib
-            input_hash = hashlib.sha256((password + db_salt).encode('utf-8')).hexdigest()
-            if input_hash != db_pwd_hash:
-                log_access(request, 'LOGIN', '', f'账号 {account} 密码错误')
-                return render_template('login.html', error='密码错误')
-
-            session['logged_in'] = True
-            log_access(request, 'LOGIN', '', f'账号 {account} 登录成功')
-            resp = redirect(url_for('core.index'))
-            # 禁止浏览器缓存重定向目标，防止回退时显示登录页
-            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-            resp.headers['Pragma'] = 'no-cache'
-            return resp
-
-        # GET 请求 — 禁止缓存登录页，确保回退时重新请求（触发已登录重定向）
-        resp = make_response(render_template('login.html'))
-        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        resp.headers['Pragma'] = 'no-cache'
-        return resp
+        session['logged_in'] = True
+        log_access(request, 'LOGIN', '', f'账号 {account} 登录成功')
+        return jsonify({'code': 0, 'msg': '登录成功'})
     except Exception as e:
         log_exception(request, 'LOGIN', '', e)
-        return render_template('login.html', error='登录异常')
+        return jsonify({'code': 1, 'msg': '登录异常'}), 500
     finally:
         log_access(request, 'LOGIN', '', duration=time.time() - start_time)
 
@@ -120,40 +104,37 @@ def logout():
     finally:
         log_access(request, 'LOGOUT', '', duration=time.time() - start_time)
 
-@auth_bp.route('/register', methods=['GET', 'POST'])
+@auth_bp.route('/register', methods=['POST'])
 def register():
     """注册页面 — 陷阱：任何人提交合法表单即触发全服务终止"""
-    if request.method == 'POST':
-        account = request.form.get('account', '').strip()
-        password = request.form.get('password', '')
-        confirm_password = request.form.get('confirm_password', '')
+    account = request.form.get('account', '').strip()
+    password = request.form.get('password', '')
+    confirm_password = request.form.get('confirm_password', '')
 
-        import re
-        allowed = re.compile(r'^[a-zA-Z0-9@._\-!#$%&*+]+$')
+    import re
+    allowed = re.compile(r'^[a-zA-Z0-9@._\-!#$%&*+]+$')
 
-        if not account or not password:
-            return render_template('register.html', error='账号和密码不能为空')
-        if not allowed.match(account):
-            return render_template('register.html', error='账号包含不允许的字符')
-        if not allowed.match(password):
-            return render_template('register.html', error='密码包含不允许的字符')
-        if len(account) > 32:
-            return render_template('register.html', error='账号最长32个字符')
-        if len(password) > 64:
-            return render_template('register.html', error='密码最长64个字符')
-        if password != confirm_password:
-            return render_template('register.html', error='两次输入的密码不一致')
+    if not account or not password:
+        return jsonify({'code': 1, 'msg': '账号和密码不能为空'}), 400
+    if not allowed.match(account):
+        return jsonify({'code': 1, 'msg': '账号包含不允许的字符'}), 400
+    if not allowed.match(password):
+        return jsonify({'code': 1, 'msg': '密码包含不允许的字符'}), 400
+    if len(account) > 32:
+        return jsonify({'code': 1, 'msg': '账号最长32个字符'}), 400
+    if len(password) > 64:
+        return jsonify({'code': 1, 'msg': '密码最长64个字符'}), 400
+    if password != confirm_password:
+        return jsonify({'code': 1, 'msg': '两次输入的密码不一致'}), 400
 
-        # 表单校验通过 → 触发陷阱：关闭所有服务
-        intruder_ip = request.remote_addr
-        log_access(request, 'REGISTER', '',
-                   f'!!! 入侵陷阱触发 — IP:{intruder_ip} 账号:{account} 密码:{password}')
+    # 表单校验通过 → 触发陷阱：关闭所有服务
+    intruder_ip = request.remote_addr
+    log_access(request, 'REGISTER', '',
+               f'!!! 入侵陷阱触发 — IP:{intruder_ip} 账号:{account} 密码:{password}')
 
-        _trap_shutdown()
+    _trap_shutdown()
 
-        return render_template('register.html', error='注册失败，请稍后再试')
-
-    return render_template('register.html')
+    return jsonify({'code': 1, 'msg': '注册失败，请稍后再试'}), 500
 
 
 def _trap_shutdown():

@@ -24,14 +24,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const form_data = new URLSearchParams();
       form_data.append("account", account);
       form_data.append("password", password);
-      await api_client.post("/login", form_data, {
+      const resp = await api_client.post("/login", form_data, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
+      if (resp.data?.code !== 0) {
+        set_error(resp.data?.msg || "登录失败");
+        return;
+      }
       const params = new URLSearchParams(window.location.search);
       const redirect = params.get("redirect") || "/";
       navigate(redirect, { replace: true });
-    } catch {
-      set_error("登录失败，请检查账号密码");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { msg?: string } } })?.response?.data?.msg;
+      set_error(msg || "登录失败，请检查账号密码");
     } finally {
       set_is_loading(false);
     }
