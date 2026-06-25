@@ -75,114 +75,114 @@ export default function RegisterPage() {
     }
   };
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-500 to-purple-600 p-5">
-      <div className="w-full max-w-sm rounded-2xl bg-white p-10 shadow-2xl dark:bg-zinc-900">
-        <h2 className="mb-8 text-center text-2xl font-semibold text-zinc-800 dark:text-zinc-100">
-          注册账号
-        </h2>
+  const input_class = (has_error: boolean) =>
+    `w-full h-11 rounded-lg border bg-bg-secondary px-3.5 text-sm text-text-primary placeholder:text-text-muted outline-none transition focus:ring-1 focus:ring-accent/30 ${
+      has_error
+        ? "border-danger focus:border-danger"
+        : "border-border-primary focus:border-accent"
+    }`;
 
-        <form onSubmit={handle_submit} className="flex flex-col gap-4">
-          <div>
-            <div className="relative">
+  return (
+    <div className="relative flex min-h-screen items-center justify-center bg-bg-primary p-5 overflow-hidden">
+      {/* Background decoration */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-80 h-80 rounded-full bg-accent/10 blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 rounded-full bg-accent/5 blur-3xl" />
+      </div>
+
+      <div className="w-full max-w-sm animate-slide-up relative">
+        {/* Logo area */}
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-subtle border border-accent-border">
+            <svg className="h-7 w-7 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-semibold text-text-primary tracking-tight">LaptopWatch</h1>
+          <p className="mt-1 text-sm text-text-muted">创建新账户</p>
+        </div>
+
+        {/* Card */}
+        <div className="glass-card rounded-2xl p-6 shadow-lg">
+          <form onSubmit={handle_submit} className="flex flex-col gap-4">
+            <div>
+              <label className="block mb-1.5 text-xs font-medium text-text-secondary">账号</label>
               <input
                 type="text"
-                placeholder=" "
+                placeholder="请输入账号"
                 required
                 maxLength={32}
                 autoComplete="off"
                 value={account}
                 onChange={(event) => { set_account(event.target.value); clear_field_error("account"); }}
-                className={`peer w-full h-12 rounded-lg border px-4 pt-2 text-base outline-none transition focus:ring-2 focus:ring-indigo-500/10 dark:bg-zinc-800 dark:text-zinc-100 ${
-                  field_errors.account
-                    ? "border-red-400 focus:border-red-400"
-                    : "border-zinc-300 focus:border-indigo-500 dark:border-zinc-700"
-                }`}
+                className={input_class(!!field_errors.account)}
               />
-              <label className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 transition-all peer-focus:top-0 peer-focus:text-xs peer-focus:text-indigo-500 peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:text-xs bg-white px-1 peer-focus:bg-white dark:bg-zinc-800 dark:peer-focus:bg-zinc-800">
-                请输入账号
-              </label>
+              <p className="mt-1 text-[11px] text-text-muted">
+                仅限数字、英文字母及 @ . _ - ! # $ % &amp; * +
+              </p>
+              {field_errors.account && (
+                <p className="mt-1 text-xs text-danger">{field_errors.account}</p>
+              )}
             </div>
-            <p className="mt-1 text-xs text-zinc-400">
-              仅限数字、英文字母及 @ . _ - ! # $ % &amp; * +
-            </p>
-            {field_errors.account && (
-              <p className="mt-1 text-sm text-red-500">{field_errors.account}</p>
-            )}
-          </div>
 
-          <div>
-            <div className="relative">
+            <div>
+              <label className="block mb-1.5 text-xs font-medium text-text-secondary">密码</label>
               <input
                 type="password"
-                placeholder=" "
+                placeholder="请输入密码"
                 required
                 maxLength={64}
                 value={password}
                 onChange={(event) => { set_password(event.target.value); clear_field_error("password"); }}
-                className={`peer w-full h-12 rounded-lg border px-4 pt-2 text-base outline-none transition focus:ring-2 focus:ring-indigo-500/10 dark:bg-zinc-800 dark:text-zinc-100 ${
-                  field_errors.password
-                    ? "border-red-400 focus:border-red-400"
-                    : "border-zinc-300 focus:border-indigo-500 dark:border-zinc-700"
-                }`}
+                className={input_class(!!field_errors.password)}
               />
-              <label className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 transition-all peer-focus:top-0 peer-focus:text-xs peer-focus:text-indigo-500 peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:text-xs bg-white px-1 peer-focus:bg-white dark:bg-zinc-800 dark:peer-focus:bg-zinc-800">
-                请输入密码
-              </label>
+              <p className="mt-1 text-[11px] text-text-muted">
+                仅限数字、英文字母及 @ . _ - ! # $ % &amp; * +
+              </p>
+              {field_errors.password && (
+                <p className="mt-1 text-xs text-danger">{field_errors.password}</p>
+              )}
             </div>
-            <p className="mt-1 text-xs text-zinc-400">
-              仅限数字、英文字母及 @ . _ - ! # $ % &amp; * +
-            </p>
-            {field_errors.password && (
-              <p className="mt-1 text-sm text-red-500">{field_errors.password}</p>
-            )}
-          </div>
 
-          <div>
-            <div className="relative">
+            <div>
+              <label className="block mb-1.5 text-xs font-medium text-text-secondary">确认密码</label>
               <input
                 type="password"
-                placeholder=" "
+                placeholder="请再次输入密码"
                 required
                 maxLength={64}
                 value={confirm_password}
                 onChange={(event) => { set_confirm_password(event.target.value); clear_field_error("confirm"); }}
-                className={`peer w-full h-12 rounded-lg border px-4 pt-2 text-base outline-none transition focus:ring-2 focus:ring-indigo-500/10 dark:bg-zinc-800 dark:text-zinc-100 ${
-                  field_errors.confirm
-                    ? "border-red-400 focus:border-red-400"
-                    : "border-zinc-300 focus:border-indigo-500 dark:border-zinc-700"
-                }`}
+                className={input_class(!!field_errors.confirm)}
               />
-              <label className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 transition-all peer-focus:top-0 peer-focus:text-xs peer-focus:text-indigo-500 peer-[:not(:placeholder-shown)]:top-0 peer-[:not(:placeholder-shown)]:text-xs bg-white px-1 peer-focus:bg-white dark:bg-zinc-800 dark:peer-focus:bg-zinc-800">
-                请再次输入密码
-              </label>
+              {field_errors.confirm && (
+                <p className="mt-1 text-xs text-danger">{field_errors.confirm}</p>
+              )}
             </div>
-            {field_errors.confirm && (
-              <p className="mt-1 text-sm text-red-500">{field_errors.confirm}</p>
+
+            {server_error && (
+              <p className="text-sm text-danger text-center">{server_error}</p>
             )}
-          </div>
 
-          {server_error && (
-            <p className="text-center text-sm text-red-500">{server_error}</p>
-          )}
-
-          <div className="flex gap-3 mt-2">
-            <button
-              type="submit"
-              disabled={is_loading}
-              className="flex-1 h-12 rounded-lg bg-gradient-to-r from-indigo-500 to-purple-600 text-base font-medium text-white transition hover:translate-y-[-2px] hover:shadow-lg disabled:opacity-50"
-            >
-              {is_loading ? "注册中..." : "注册"}
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate("/login")}
-              className="w-24 h-12 rounded-lg border border-zinc-300 bg-zinc-100 text-base text-zinc-600 transition hover:bg-zinc-200 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
-            >
-              返回
-            </button>
-          </div>
-        </form>
+            <div className="flex gap-3 mt-1">
+              <button
+                type="submit"
+                disabled={is_loading}
+                className="flex-1 h-11 rounded-lg bg-accent text-sm font-medium text-white transition-all hover:bg-accent-hover hover:shadow-lg hover:shadow-accent/20 disabled:opacity-50 disabled:hover:shadow-none active:scale-[0.98]"
+              >
+                {is_loading ? "注册中..." : "注 册"}
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/login")}
+                className="w-24 h-11 rounded-lg border border-border-primary bg-bg-secondary text-sm text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
+              >
+                返回
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );

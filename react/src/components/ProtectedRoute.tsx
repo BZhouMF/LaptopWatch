@@ -26,8 +26,8 @@ export default function ProtectedRoute() {
 
   if (is_checking) {
     return (
-      <div className="flex h-screen items-center justify-center bg-white dark:bg-zinc-950">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-700 dark:border-t-zinc-400" />
+      <div className="flex h-screen items-center justify-center bg-bg-primary">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
       </div>
     );
   }

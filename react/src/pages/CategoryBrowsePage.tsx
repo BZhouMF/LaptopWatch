@@ -54,6 +54,48 @@ const STORAGE_KEY = "category_spa_stack";
 const RETURNING_KEY = "category_spa_returning";
 const MAX_STACK = 60;
 
+// ─── Reusable components ──────────────────────────────
+
+function Spinner() {
+  return (
+    <div className="flex justify-center py-10">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
+    </div>
+  );
+}
+
+function MediaCard({ file, on_click }: { file: MediaItem; on_click: () => void }) {
+  return (
+    <button
+      onClick={on_click}
+      className="group relative flex flex-col overflow-hidden rounded-xl bg-bg-card border border-border-primary transition-all hover:border-accent-border hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.98]"
+    >
+      <div className="relative aspect-video bg-bg-secondary overflow-hidden">
+        <img
+          src={`/media/thumbnail/${encodeURIComponent(file.relative_path)}`}
+          alt={file.name}
+          loading="lazy"
+          className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+        {file.is_video && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 backdrop-blur text-white transition group-hover:scale-110 group-hover:bg-accent/80">
+              <svg className="h-4 w-4 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="p-2.5">
+        <p className="text-xs font-medium text-text-primary truncate text-left">{file.name}</p>
+      </div>
+    </button>
+  );
+}
+
 // ─── Component ────────────────────────────────────────
 
 export default function CategoryBrowsePage() {
@@ -94,7 +136,6 @@ export default function CategoryBrowsePage() {
 
   useEffect(() => {
     const init = async () => {
-      // Returning from player?
       if (sessionStorage.getItem(RETURNING_KEY) === "1") {
         sessionStorage.removeItem(RETURNING_KEY);
         const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -108,7 +149,6 @@ export default function CategoryBrowsePage() {
         }
       }
 
-      // Fresh entry: fetch initial category data
       set_is_loading(true);
       try {
         const resp = await api_client.get<{ code: number; data: CategoryInfo }>(
@@ -117,7 +157,6 @@ export default function CategoryBrowsePage() {
         );
         if (resp.data.code === 0) {
           const info = resp.data.data;
-          // Single leaf auto-forward
           if (info.single_leaf_override && info.categories.length === 1) {
             const cat = info.categories[0];
             navigate_to_grid_internal(cat.path, cat.name, info.parent_path || "", false);
@@ -233,13 +272,6 @@ export default function CategoryBrowsePage() {
     window.history.replaceState({ spaIndex: current_index - 1 }, "");
   }, [current_index, navigate]);
 
-  const navigate_forward = useCallback(() => {
-    if (current_index < nav_stack.length - 1) {
-      set_current_index(current_index + 1);
-      window.history.replaceState({ spaIndex: current_index + 1 }, "");
-    }
-  }, [current_index, nav_stack.length]);
-
   // ── Grid operations ──────────────────────────────────
 
   const grid_load_page = useCallback(
@@ -289,7 +321,6 @@ export default function CategoryBrowsePage() {
     [current_entry, grid_load_page]
   );
 
-  // Open media player
   const open_media = useCallback(
     (relative_path: string) => {
       sessionStorage.setItem(RETURNING_KEY, "1");
@@ -314,7 +345,7 @@ export default function CategoryBrowsePage() {
       const anchor = target.closest("a");
       if (!anchor) return;
       const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("http")) return; // external link
+      if (!href || href.startsWith("http")) return;
 
       const spa_nav = anchor.getAttribute("data-spa-nav");
       const spa_path = anchor.getAttribute("data-spa-path");
@@ -335,7 +366,7 @@ export default function CategoryBrowsePage() {
   if (is_loading && nav_stack.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-500" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
       </div>
     );
   }
@@ -343,7 +374,7 @@ export default function CategoryBrowsePage() {
   if (!current_entry) {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-zinc-500">加载失败</p>
+        <p className="text-text-muted">加载失败</p>
       </div>
     );
   }
@@ -354,23 +385,23 @@ export default function CategoryBrowsePage() {
     const info = current_entry.data;
 
     return (
-      <div className="flex flex-col h-full" onClick={handle_click}>
+      <div className="flex flex-col h-full bg-bg-primary" onClick={handle_click}>
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
           {can_go_back && (
             <button
               onClick={navigate_back}
-              className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
             >
               ← 返回
             </button>
           )}
-          <h1 className="text-base font-semibold text-zinc-800 dark:text-zinc-100 truncate">
+          <h1 className="text-base font-semibold text-text-primary truncate">
             {info.folder_name}
           </h1>
           <a
             href={`/category/browse/${encodeURIComponent(parent_path)}?refresh=1`}
-            className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-sm text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-bg-card-hover hover:text-text-primary"
             data-spa-nav="ignore"
           >
             刷新
@@ -380,12 +411,12 @@ export default function CategoryBrowsePage() {
         {/* Content */}
         <div className="flex-1 overflow-auto">
           {info.categories.map((cat) => (
-            <section key={cat.path} className="mb-2">
-              <div className="flex items-center justify-between px-4 py-2">
-                <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
+            <section key={cat.path} className="mb-1">
+              <div className="flex items-center justify-between px-4 py-3">
+                <h2 className="text-sm font-semibold text-text-primary truncate">
                   {cat.name}
                   {cat.folder_count !== undefined && (
-                    <span className="ml-1 text-xs font-normal text-zinc-400">
+                    <span className="ml-1.5 text-xs font-normal text-text-muted">
                       ({cat.total_files})
                     </span>
                   )}
@@ -395,41 +426,15 @@ export default function CategoryBrowsePage() {
                     href="#"
                     data-spa-nav="category"
                     data-spa-path={cat.path}
-                    className="shrink-0 text-xs text-indigo-500 hover:underline"
+                    className="shrink-0 text-xs font-medium text-accent hover:text-accent-hover transition"
                   >
                     查看更多 →
                   </a>
                 )}
               </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 px-4">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
                 {cat.files.slice(0, 10).map((file) => (
-                  <button
-                    key={file.relative_path}
-                    onClick={() => open_media(file.relative_path)}
-                    className="group relative flex flex-col overflow-hidden rounded-xl bg-white shadow-sm border border-zinc-200/50 transition hover:shadow-md dark:bg-zinc-900 dark:border-zinc-800"
-                  >
-                    <div className="relative aspect-video bg-zinc-100 dark:bg-zinc-800">
-                      <img
-                        src={`/media/thumbnail/${encodeURIComponent(file.relative_path)}`}
-                        alt={file.name}
-                        loading="lazy"
-                        className="h-full w-full object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                      {file.is_video && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white text-sm transition group-hover:scale-110">
-                            ▶
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-2">
-                      <p className="text-xs text-zinc-700 truncate text-left dark:text-zinc-300">
-                        {file.name}
-                      </p>
-                    </div>
-                  </button>
+                  <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
               </div>
             </section>
@@ -437,49 +442,30 @@ export default function CategoryBrowsePage() {
 
           {/* Root files */}
           {info.root_files.length > 0 && (
-            <section className="mb-2">
-              <div className="px-4 py-2">
-                <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
-                  根目录文件 ({info.root_files.length})
+            <section className="mb-1">
+              <div className="px-4 py-3">
+                <h2 className="text-sm font-semibold text-text-primary">
+                  根目录文件
+                  <span className="ml-1.5 text-xs font-normal text-text-muted">({info.root_files.length})</span>
                 </h2>
               </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2 px-4">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
                 {info.root_files.map((file) => (
-                  <button
-                    key={file.relative_path}
-                    onClick={() => open_media(file.relative_path)}
-                    className="group relative flex flex-col overflow-hidden rounded-xl bg-white shadow-sm border border-zinc-200/50 transition hover:shadow-md dark:bg-zinc-900 dark:border-zinc-800"
-                  >
-                    <div className="relative aspect-video bg-zinc-100 dark:bg-zinc-800">
-                      <img
-                        src={`/media/thumbnail/${encodeURIComponent(file.relative_path)}`}
-                        alt={file.name}
-                        loading="lazy"
-                        className="h-full w-full object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                      {file.is_video && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white text-sm transition group-hover:scale-110">
-                            ▶
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-2">
-                      <p className="text-xs text-zinc-700 truncate text-left dark:text-zinc-300">
-                        {file.name}
-                      </p>
-                    </div>
-                  </button>
+                  <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
               </div>
             </section>
           )}
 
           {info.categories.length === 0 && info.root_files.length === 0 && (
-            <div className="flex items-center justify-center py-20">
-              <p className="text-zinc-400">此目录为空</p>
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-bg-card border border-border-primary">
+                <svg className="h-8 w-8 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+              </div>
+              <p className="text-text-muted">此目录为空</p>
             </div>
           )}
         </div>
@@ -507,21 +493,21 @@ export default function CategoryBrowsePage() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full bg-bg-primary">
       {/* Grid Header */}
-      <div className="flex items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
         <button
           onClick={navigate_back}
-          className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
         >
           ← 返回
         </button>
-        <h1 className="text-base font-semibold text-zinc-800 dark:text-zinc-100 truncate">
+        <h1 className="text-base font-semibold text-text-primary truncate">
           {grid_entry.folder_name}
         </h1>
         <a
           href={`/category/grid/${encodeURIComponent(grid_entry.folder_path)}?refresh=1`}
-          className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-sm text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-bg-card-hover hover:text-text-primary"
         >
           刷新
         </a>
@@ -530,43 +516,21 @@ export default function CategoryBrowsePage() {
       {/* Grid Content */}
       <div className="flex-1 overflow-auto p-4">
         {grid_items.length === 0 && !grid_page ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-500" />
-          </div>
+          <Spinner />
         ) : grid_items.length === 0 ? (
-          <div className="flex items-center justify-center py-20">
-            <p className="text-zinc-400">此目录没有媒体文件</p>
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-bg-card border border-border-primary">
+              <svg className="h-8 w-8 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </div>
+            <p className="text-text-muted">此目录没有媒体文件</p>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             {grid_items.map((file) => (
-              <button
-                key={file.relative_path}
-                onClick={() => open_media(file.relative_path)}
-                className="group relative flex flex-col overflow-hidden rounded-xl bg-white shadow-sm border border-zinc-200/50 transition hover:shadow-md dark:bg-zinc-900 dark:border-zinc-800"
-              >
-                <div className="relative aspect-video bg-zinc-100 dark:bg-zinc-800">
-                  <img
-                    src={`/media/thumbnail/${encodeURIComponent(file.relative_path)}`}
-                    alt={file.name}
-                    loading="lazy"
-                    className="h-full w-full object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                  />
-                  {file.is_video && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-black/50 text-white text-sm transition group-hover:scale-110">
-                        ▶
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="p-2">
-                  <p className="text-xs text-zinc-700 truncate text-left dark:text-zinc-300">
-                    {file.name}
-                  </p>
-                </div>
-              </button>
+              <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
             ))}
           </div>
         )}
@@ -574,26 +538,26 @@ export default function CategoryBrowsePage() {
 
       {/* Grid Pagination */}
       {grid_items.length > 0 && (
-        <div className="flex items-center justify-center gap-2 border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-center justify-center gap-1.5 border-t border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
           <button
             onClick={() => grid_change_page(grid_entry.current_page - 1)}
             disabled={grid_entry.current_page <= 1}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-lg border border-border-primary px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
           >
             上一页
           </button>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5">
             {visible_pages().map((p, idx) =>
               p === "dots" ? (
-                <span key={`dots-${idx}`} className="px-1 text-zinc-400">...</span>
+                <span key={`dots-${idx}`} className="px-1 text-text-muted text-xs">...</span>
               ) : (
                 <button
                   key={p}
                   onClick={() => grid_change_page(p)}
-                  className={`min-w-[32px] rounded-lg px-2 py-1.5 text-sm transition ${
+                  className={`min-w-[32px] rounded-lg px-2 py-1.5 text-xs font-medium transition ${
                     p === grid_entry.current_page
-                      ? "bg-indigo-500 text-white"
-                      : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                      ? "bg-accent text-white shadow-sm"
+                      : "text-text-secondary hover:bg-bg-card-hover hover:text-text-primary"
                   }`}
                 >
                   {p}
@@ -604,7 +568,7 @@ export default function CategoryBrowsePage() {
           <button
             onClick={() => grid_change_page(grid_entry.current_page + 1)}
             disabled={!grid_has_more}
-            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 disabled:opacity-30 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-lg border border-border-primary px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
           >
             下一页
           </button>
@@ -612,7 +576,7 @@ export default function CategoryBrowsePage() {
       )}
 
       {!grid_has_more && grid_items.length > 0 && (
-        <p className="py-3 text-center text-xs text-zinc-300 dark:text-zinc-700">已加载全部内容</p>
+        <p className="py-3 text-center text-[11px] text-text-muted">已加载全部内容</p>
       )}
     </div>
   );

@@ -768,39 +768,41 @@ export default function MediaPlayerPage(): JSX.Element {
       {/* ─── Loading / Error / End ──────────────────── */}
       {status === "loading" && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
         </div>
       )}
       {status === "ended" && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
-          <p className="text-white/70 text-lg">没有更多视频了</p>
+          <div className="rounded-xl bg-black/60 backdrop-blur px-6 py-3">
+            <p className="text-white/80 text-base font-medium">没有更多视频了</p>
+          </div>
         </div>
       )}
       {error_msg && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 rounded-lg bg-red-500/80 px-4 py-2 text-sm text-white">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 rounded-xl bg-danger/90 backdrop-blur px-4 py-2.5 text-sm font-medium text-white shadow-lg animate-fade-in">
           {error_msg}
         </div>
       )}
 
       {/* ─── Top Bar ────────────────────────────────── */}
       {controls_visible && (
-        <div className="player-controls-area absolute top-0 left-0 right-0 z-20 flex items-center gap-3 bg-gradient-to-b from-black/60 to-transparent px-4 py-3">
+        <div className="player-controls-area absolute top-0 left-0 right-0 z-20 flex items-center gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pt-4 pb-6">
           <button
             onClick={() => window.history.back()}
-            className="rounded-lg px-3 py-1.5 text-sm text-white/80 transition hover:text-white"
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-white/80 transition hover:text-white hover:bg-white/10"
           >
             ← 返回
           </button>
-          <span className="truncate text-sm text-white/80">{current_media?.name || ""}</span>
-          <div className="ml-auto flex items-center gap-2">
+          <span className="truncate text-sm font-medium text-white/90">{current_media?.name || ""}</span>
+          <div className="ml-auto flex items-center gap-1">
             {is_grid && (
               <>
-                <button onClick={handle_nav_prev} className="rounded-full p-2 text-white/80 transition hover:text-white">
+                <button onClick={handle_nav_prev} className="rounded-full p-2 text-white/70 transition hover:text-white hover:bg-white/10">
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
                   </svg>
                 </button>
-                <button onClick={handle_nav_next} className="rounded-full p-2 text-white/80 transition hover:text-white">
+                <button onClick={handle_nav_next} className="rounded-full p-2 text-white/70 transition hover:text-white hover:bg-white/10">
                   <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -814,23 +816,23 @@ export default function MediaPlayerPage(): JSX.Element {
       {/* ─── Center: Skip buttons + Play/Pause ──────── */}
       {controls_visible && show_video && (
         <div className="player-controls-area absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="flex items-center gap-8 pointer-events-auto">
-            <button onClick={() => skip_time(-15)} className="rounded-full bg-white/15 p-3 text-white/80 transition hover:bg-white/25">
-              <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+          <div className="flex items-center gap-6 pointer-events-auto">
+            <button onClick={() => skip_time(-15)} className="flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95">
+              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
               </svg>
-              <span className="block text-[10px] mt-0.5">15</span>
+              <span className="text-[10px] font-medium mt-0.5">15</span>
             </button>
-            <button onClick={toggle_play} className="rounded-full bg-white/15 p-4 text-white transition hover:bg-white/25">
-              <svg className="h-8 w-8" fill="currentColor" viewBox="0 0 24 24">
+            <button onClick={toggle_play} className="flex items-center justify-center rounded-full bg-white/15 w-16 h-16 text-white transition hover:bg-white/25 hover:scale-105 active:scale-95">
+              <svg className="h-7 w-7" fill="currentColor" viewBox="0 0 24 24">
                 {show_video ? (is_playing ? <path d={PAUSE_ICON}/> : <path d={PLAY_ICON}/>) : <path d={PLAY_ICON}/>}
               </svg>
             </button>
-            <button onClick={() => skip_time(15)} className="rounded-full bg-white/15 p-3 text-white/80 transition hover:bg-white/25">
-              <svg className="h-6 w-6 rotate-180" fill="currentColor" viewBox="0 0 24 24">
+            <button onClick={() => skip_time(15)} className="flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95">
+              <svg className="h-5 w-5 rotate-180" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
               </svg>
-              <span className="block text-[10px] mt-0.5">15</span>
+              <span className="text-[10px] font-medium mt-0.5">15</span>
             </button>
           </div>
         </div>
@@ -838,30 +840,30 @@ export default function MediaPlayerPage(): JSX.Element {
 
       {/* ─── Bottom Controls ────────────────────────── */}
       {controls_visible && show_video && (
-        <div className="player-controls-area absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/60 to-transparent px-4 pb-3 pt-8">
+        <div className="player-controls-area absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10">
           {/* Progress bar */}
           <div
             ref={progress_ref}
-            className="relative h-8 cursor-pointer flex items-center -mx-2 px-2"
+            className="relative h-10 cursor-pointer flex items-center group -mx-1 px-1"
             onPointerDown={handle_progress_pointer_down}
             onPointerMove={handle_progress_pointer_move}
             onPointerUp={handle_progress_pointer_up}
           >
-            <div className="w-full h-1 rounded-full bg-white/20">
-              <div className="h-full rounded-full bg-indigo-400 relative" style={{ width: `${progress_pct}%` }}>
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-white shadow" />
+            <div className="w-full h-1 rounded-full bg-white/20 group-hover:h-1.5 transition-all">
+              <div className="h-full rounded-full bg-accent relative" style={{ width: `${progress_pct}%` }}>
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full bg-white shadow-lg opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </div>
           </div>
 
           {/* Controls row */}
-          <div className="flex items-center gap-3 mt-1">
-            <button onClick={toggle_play} className="text-white/80 hover:text-white">
+          <div className="flex items-center gap-3 mt-2">
+            <button onClick={toggle_play} className="text-white/80 hover:text-white transition">
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 {is_playing ? <path d={PAUSE_ICON}/> : <path d={PLAY_ICON}/>}
               </svg>
             </button>
-            <span className="text-xs text-white/60 tabular-nums min-w-[90px]">
+            <span className="text-xs text-white/50 tabular-nums min-w-[90px] font-medium">
               {format_time(current_time)} / {format_time(duration)}
             </span>
             <div className="flex-1" />
@@ -869,33 +871,33 @@ export default function MediaPlayerPage(): JSX.Element {
             <div className="relative">
               <button
                 onClick={() => { set_settings_open((prev) => !prev); set_speed_menu_open(false); }}
-                className="text-white/80 hover:text-white text-sm"
+                className="text-sm text-white/70 hover:text-white transition"
               >
                 设置
               </button>
               {settings_open && (
-                <div className="absolute bottom-full right-0 mb-2 rounded-lg bg-zinc-900/95 py-1 shadow-xl backdrop-blur min-w-[120px]">
+                <div className="absolute bottom-full right-0 mb-2 rounded-xl bg-black/90 border border-white/10 py-1.5 shadow-xl backdrop-blur min-w-[130px] animate-fade-in">
                   <button
                     onClick={() => { toggle_mute(); set_settings_open(false); }}
-                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-white/80 hover:bg-white/10"
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-white/80 hover:bg-white/10 transition"
                   >
                     {is_muted ? "🔇 取消静音" : "🔊 静音"}
                   </button>
                   <div className="relative">
                     <button
                       onClick={() => set_speed_menu_open((prev) => !prev)}
-                      className="flex w-full items-center justify-between px-4 py-2 text-sm text-white/80 hover:bg-white/10"
+                      className="flex w-full items-center justify-between px-4 py-2.5 text-sm text-white/80 hover:bg-white/10 transition"
                     >
-                      倍速 <span>{selected_speed.toFixed(2)}x</span>
+                      倍速 <span className="text-white/50">{selected_speed.toFixed(2)}x</span>
                     </button>
                     {speed_menu_open && (
-                      <div className="absolute right-full bottom-0 mr-1 rounded-lg bg-zinc-900/95 py-1 shadow-xl backdrop-blur">
+                      <div className="absolute right-full bottom-0 mr-1 rounded-xl bg-black/90 border border-white/10 py-1.5 shadow-xl backdrop-blur animate-fade-in">
                         {SPEED_OPTIONS.map((speed) => (
                           <button
                             key={speed}
                             onClick={() => set_speed(speed)}
-                            className={`block w-full px-4 py-2 text-left text-sm whitespace-nowrap ${
-                              selected_speed === speed ? "text-indigo-400" : "text-white/80 hover:bg-white/10"
+                            className={`block w-full px-4 py-2.5 text-left text-sm whitespace-nowrap transition ${
+                              selected_speed === speed ? "text-accent font-medium" : "text-white/70 hover:bg-white/10"
                             }`}
                           >
                             {speed.toFixed(2)}x
@@ -907,7 +909,7 @@ export default function MediaPlayerPage(): JSX.Element {
                 </div>
               )}
             </div>
-            <button onClick={toggle_fullscreen} className="text-white/80 hover:text-white ml-1">
+            <button onClick={toggle_fullscreen} className="text-white/70 hover:text-white ml-1 transition">
               <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
                 {is_fullscreen ? (
                   <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/>
@@ -922,29 +924,29 @@ export default function MediaPlayerPage(): JSX.Element {
 
       {/* ─── Indicators ─────────────────────────────── */}
       {speed_active && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-lg bg-black/70 px-4 py-2 text-lg font-bold text-white">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-xl bg-black/75 backdrop-blur px-5 py-3 text-xl font-bold text-white shadow-lg">
           3x
         </div>
       )}
       {seek_indicator.active && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-lg bg-black/70 px-4 py-2 text-white">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-xl bg-black/75 backdrop-blur px-5 py-3 text-base font-medium text-white shadow-lg animate-fade-in">
           {seek_indicator.time}
         </div>
       )}
       {vol_indicator.active && (
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1">
-          <div className="h-32 w-2 rounded-full bg-white/20 overflow-hidden">
-            <div className="w-full bg-white rounded-full transition-all" style={{ height: `${vol_indicator.pct}%`, marginTop: `${100 - vol_indicator.pct}%` }} />
+        <div className="absolute right-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2">
+          <div className="h-32 w-2.5 rounded-full bg-white/15 overflow-hidden">
+            <div className="w-full bg-white/90 rounded-full transition-all" style={{ height: `${vol_indicator.pct}%`, marginTop: `${100 - vol_indicator.pct}%` }} />
           </div>
-          <span className="text-xs text-white/80">{vol_indicator.pct}%</span>
+          <span className="text-xs font-medium text-white/80">{vol_indicator.pct}</span>
         </div>
       )}
       {bright_indicator.active && (
-        <div className="absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-1">
-          <div className="h-32 w-2 rounded-full bg-white/20 overflow-hidden">
-            <div className="w-full bg-white rounded-full transition-all" style={{ height: `${bright_indicator.pct}%`, marginTop: `${100 - bright_indicator.pct}%` }} />
+        <div className="absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2">
+          <div className="h-32 w-2.5 rounded-full bg-white/15 overflow-hidden">
+            <div className="w-full bg-white/90 rounded-full transition-all" style={{ height: `${bright_indicator.pct}%`, marginTop: `${100 - bright_indicator.pct}%` }} />
           </div>
-          <span className="text-xs text-white/80">{bright_indicator.pct}%</span>
+          <span className="text-xs font-medium text-white/80">{bright_indicator.pct}</span>
         </div>
       )}
     </div>

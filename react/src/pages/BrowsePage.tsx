@@ -34,9 +34,9 @@ type SortField = "name" | "date" | "size";
 type SortOrder = "asc" | "desc";
 
 const VIEW_CLASS: Record<ViewMode, string> = {
-  large: "grid-cols-[repeat(auto-fill,minmax(130px,1fr))]",
-  medium: "grid-cols-[repeat(auto-fill,minmax(110px,1fr))]",
-  small: "grid-cols-[repeat(auto-fill,minmax(90px,1fr))]",
+  large: "grid-cols-[repeat(auto-fill,minmax(140px,1fr))]",
+  medium: "grid-cols-[repeat(auto-fill,minmax(120px,1fr))]",
+  small: "grid-cols-[repeat(auto-fill,minmax(96px,1fr))]",
   list: "",
 };
 
@@ -57,8 +57,27 @@ function get_sort_label(sort: SortField): string {
   }
 }
 
-function is_mobile(): boolean {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+function Spinner() {
+  return (
+    <div className="flex justify-center py-8">
+      <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
+    </div>
+  );
+}
+
+function SidebarButton({ active, children, onClick }: { active?: boolean; children: React.ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-all ${
+        active
+          ? "bg-accent text-white shadow-sm"
+          : "text-text-secondary hover:bg-bg-card-hover hover:text-text-primary"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
 
 export default function BrowsePage() {
@@ -67,7 +86,6 @@ export default function BrowsePage() {
   const [search_params] = useSearchParams();
   const decoded_path = useMemo(() => decodeURIComponent(dirpath || ""), [dirpath]);
 
-  // Persisted preferences
   const [current_view, set_current_view] = useState<ViewMode>(
     () => (localStorage.getItem("currentView") as ViewMode) || "large"
   );
@@ -78,7 +96,6 @@ export default function BrowsePage() {
     () => (localStorage.getItem("currentOrder") as SortOrder) || "asc"
   );
 
-  // Data
   const [folders, set_folders] = useState<FolderItem[]>([]);
   const [files, set_files] = useState<FileItem[]>([]);
   const [offset, set_offset] = useState(0);
@@ -87,16 +104,13 @@ export default function BrowsePage() {
   const [folders_loaded, set_folders_loaded] = useState(false);
   const [error, set_error] = useState<string | null>(null);
 
-  // Sidebar
   const [sidebar_open, set_sidebar_open] = useState(
     () => localStorage.getItem("sidebarOpen") === "true"
   );
 
-  // Selection
   const [selection_mode, set_selection_mode] = useState(false);
   const [selected_paths, set_selected_paths] = useState<Set<string>>(new Set());
 
-  // Preview
   const [preview, set_preview] = useState<{
     url: string; name: string; is_video: boolean; download_url: string;
   } | null>(null);
@@ -104,7 +118,6 @@ export default function BrowsePage() {
   const abort_ref = useRef<AbortController | null>(null);
   const sentinel_ref = useRef<HTMLDivElement | null>(null);
 
-  // Sync preferences to localStorage
   useEffect(() => { localStorage.setItem("currentView", current_view); }, [current_view]);
   useEffect(() => { localStorage.setItem("currentSort", current_sort); }, [current_sort]);
   useEffect(() => { localStorage.setItem("currentOrder", current_order); }, [current_order]);
@@ -139,7 +152,6 @@ export default function BrowsePage() {
     const load = async () => {
       const signal = controller.signal;
       try {
-        // Load folders
         const folder_resp = await api_client.get<FolderItem[]>("/api/list", {
           params: { path: decoded_path, type: "folders", sort: current_sort, order: current_order },
           signal,
@@ -234,7 +246,7 @@ export default function BrowsePage() {
 
   const handle_go_back = useCallback(async () => {
     const history: string[] = JSON.parse(localStorage.getItem("fileHistory") || "[]");
-    history.pop(); // Remove current
+    history.pop();
     while (history.length > 0) {
       const candidate = history.pop()!;
       try {
@@ -256,7 +268,6 @@ export default function BrowsePage() {
     navigate(`/browse/${dirpath}?refresh=1`);
   }, [navigate, dirpath]);
 
-  // View / sort / order
   const cycle_view = useCallback(() => {
     const views: ViewMode[] = ["large", "medium", "small", "list"];
     const idx = views.indexOf(current_view);
@@ -351,14 +362,19 @@ export default function BrowsePage() {
   const is_grid = current_view !== "list";
   const is_empty = !is_loading && folders.length === 0 && files.length === 0;
 
+  const selected_class = (path: string) =>
+    selected_paths.has(path)
+      ? "ring-2 ring-accent bg-accent-subtle"
+      : "";
+
   return (
-    <div className="flex h-[calc(100vh-0px)] flex-col">
+    <div className="flex h-[calc(100vh-0px)] flex-col bg-bg-primary">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-2 dark:border-zinc-800 dark:bg-zinc-950">
+      <header className="flex items-center justify-between border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-2">
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={() => set_sidebar_open((prev) => !prev)}
-            className="shrink-0 rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="shrink-0 rounded-lg p-2 text-text-muted transition hover:bg-bg-card-hover hover:text-text-primary"
             title="侧边栏"
           >
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -367,18 +383,18 @@ export default function BrowsePage() {
           </button>
           <button
             onClick={handle_go_home}
-            className="shrink-0 text-sm font-semibold text-zinc-700 transition hover:text-indigo-500 dark:text-zinc-300"
+            className="shrink-0 text-sm font-semibold text-text-primary transition hover:text-accent"
           >
             LaptopWatch
           </button>
-          <span className="text-zinc-300 dark:text-zinc-700">/</span>
+          <span className="text-text-muted">/</span>
           <nav className="flex items-center gap-0.5 overflow-x-auto text-sm whitespace-nowrap">
             {breadcrumbs.map((segment, index) => (
               <span key={segment.path} className="flex items-center gap-0.5">
-                {index > 0 && <span className="text-zinc-300 dark:text-zinc-700">/</span>}
+                {index > 0 && <span className="text-text-muted">/</span>}
                 <button
                   onClick={() => handle_folder_click(segment.path)}
-                  className="rounded px-1.5 py-0.5 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                  className="rounded-md px-1.5 py-0.5 text-text-muted transition hover:bg-bg-card-hover hover:text-text-primary"
                 >
                   {segment.label}
                 </button>
@@ -389,13 +405,13 @@ export default function BrowsePage() {
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={handle_go_back}
-            className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
           >
             返回
           </button>
           <button
             onClick={handle_refresh}
-            className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 transition hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
           >
             刷新
           </button>
@@ -403,144 +419,146 @@ export default function BrowsePage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar overlay */}
+        {sidebar_open && (
+          <div
+            className="fixed inset-0 z-20 bg-black/50 backdrop-blur-sm lg:hidden"
+            onClick={() => set_sidebar_open(false)}
+          />
+        )}
+
         {/* Sidebar */}
-        <>
-          {sidebar_open && (
-            <div
-              className="fixed inset-0 z-20 bg-black/30 lg:hidden"
-              onClick={() => set_sidebar_open(false)}
-            />
-          )}
-          <aside
-            className={`${sidebar_open ? "translate-x-0" : "-translate-x-full"} fixed left-0 top-[49px] bottom-0 z-30 w-72 border-r border-zinc-200 bg-white p-4 transition-transform lg:static lg:translate-x-0 dark:border-zinc-800 dark:bg-zinc-950`}
-          >
-            <div className="flex flex-col gap-3">
-              <div>
-                <label className="text-xs font-medium text-zinc-400">视图模式</label>
-                <button
-                  onClick={cycle_view}
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  {get_view_label(current_view)}
-                </button>
+        <aside
+          className={`${
+            sidebar_open ? "translate-x-0" : "-translate-x-full"
+          } fixed left-0 top-[49px] bottom-0 z-30 w-64 border-r border-border-primary bg-bg-secondary/95 backdrop-blur p-4 transition-transform lg:static lg:translate-x-0`}
+        >
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-text-muted">视图模式</label>
+              <div className="mt-1.5">
+                <SidebarButton onClick={cycle_view}>{get_view_label(current_view)}</SidebarButton>
               </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-400">排序方式</label>
-                <button
-                  onClick={cycle_sort}
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  {get_sort_label(current_sort)}
-                </button>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-400">排序方向</label>
-                <button
-                  onClick={toggle_order}
-                  className="mt-1 w-full rounded-lg border border-zinc-300 px-3 py-2 text-left text-sm text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  {current_order === "asc" ? "升序 ↑" : "降序 ↓"}
-                </button>
-              </div>
-              <hr className="border-zinc-200 dark:border-zinc-800" />
-              <button
-                onClick={toggle_selection_mode}
-                className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition ${
-                  selection_mode
-                    ? "bg-indigo-500 text-white"
-                    : "border border-zinc-300 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                }`}
-              >
-                {selection_mode ? "退出选择模式" : "选择模式"}
-              </button>
-              {selection_mode && (
-                <button
-                  onClick={select_all}
-                  className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                >
-                  全选
-                </button>
-              )}
             </div>
-          </aside>
-        </>
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-text-muted">排序方式</label>
+              <div className="mt-1.5">
+                <SidebarButton onClick={cycle_sort}>{get_sort_label(current_sort)}</SidebarButton>
+              </div>
+            </div>
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wider text-text-muted">排序方向</label>
+              <div className="mt-1.5">
+                <SidebarButton onClick={toggle_order}>
+                  {current_order === "asc" ? "升序 ↑" : "降序 ↓"}
+                </SidebarButton>
+              </div>
+            </div>
+            <hr className="border-border-primary" />
+            <button
+              onClick={toggle_selection_mode}
+              className={`w-full rounded-lg px-3 py-2 text-sm font-medium transition-all ${
+                selection_mode
+                  ? "bg-accent text-white shadow-sm"
+                  : "text-text-secondary hover:bg-bg-card-hover hover:text-text-primary"
+              }`}
+            >
+              {selection_mode ? "退出选择模式" : "选择模式"}
+            </button>
+            {selection_mode && (
+              <button
+                onClick={select_all}
+                className="w-full rounded-lg px-3 py-2 text-sm font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
+              >
+                全选
+              </button>
+            )}
+          </div>
+        </aside>
 
         {/* Main Content */}
         <div className="flex-1 overflow-auto">
           {error && (
             <div className="p-4">
-              <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
+              <p className="rounded-lg bg-danger/10 border border-danger/20 px-4 py-3 text-sm text-danger">
                 {error}
               </p>
             </div>
           )}
 
           {is_empty && (
-            <div className="flex items-center justify-center p-20">
-              <p className="text-zinc-400">此文件夹为空</p>
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-bg-card border border-border-primary">
+                <svg className="h-8 w-8 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+              </div>
+              <p className="text-text-muted">此文件夹为空</p>
             </div>
           )}
 
           {/* Folders */}
           {folders.length > 0 && (
             <div className="p-3">
-              <div className={is_grid ? `grid ${VIEW_CLASS[current_view]} gap-2` : ""}>
-                {folders.map((folder) =>
-                  is_grid ? (
+              {is_grid ? (
+                <div className={`grid ${VIEW_CLASS[current_view]} gap-2`}>
+                  {folders.map((folder) => (
                     <button
                       key={folder.path}
                       onClick={() => {
                         if (selection_mode) toggle_select_item(folder.path);
                         else handle_folder_click(folder.path);
                       }}
-                      className={`flex flex-col items-center rounded-xl p-4 text-center transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                        selected_paths.has(folder.path) ? "ring-2 ring-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : ""
-                      }`}
+                      className={`flex flex-col items-center rounded-xl p-4 text-center transition-all hover:bg-bg-card-hover active:scale-[0.98] ${selected_class(folder.path)}`}
                     >
                       {selection_mode && (
                         <input
                           type="checkbox"
                           checked={selected_paths.has(folder.path)}
                           onChange={() => toggle_select_item(folder.path)}
-                          className="mb-1"
+                          className="mb-1.5 accent-accent"
                           onClick={(e) => e.stopPropagation()}
                         />
                       )}
-                      <span className="text-3xl mb-2">{folder.icon}</span>
-                      <span className="text-xs text-zinc-700 text-center break-all line-clamp-2 dark:text-zinc-300">
+                      <span className="text-3xl mb-2">📁</span>
+                      <span className="text-xs font-medium text-text-primary break-all line-clamp-2">
                         {folder.name}
                       </span>
                     </button>
-                  ) : (
+                  ))}
+                </div>
+              ) : (
+                <div>
+                  {folders.map((folder) => (
                     <div
                       key={folder.path}
                       onClick={() => {
                         if (selection_mode) toggle_select_item(folder.path);
                         else handle_folder_click(folder.path);
                       }}
-                      className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                        selected_paths.has(folder.path) ? "ring-2 ring-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : ""
-                      }`}
+                      className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-all hover:bg-bg-card-hover ${selected_class(folder.path)}`}
                     >
                       {selection_mode && (
                         <input
                           type="checkbox"
                           checked={selected_paths.has(folder.path)}
                           onChange={() => toggle_select_item(folder.path)}
+                          className="accent-accent"
                           onClick={(e) => e.stopPropagation()}
                         />
                       )}
-                      <span className="text-xl">{folder.icon}</span>
-                      <span className="flex-1 text-sm text-zinc-700 truncate dark:text-zinc-300">{folder.name}</span>
-                      <span className="text-xs text-zinc-400">{folder.date}</span>
+                      <span className="text-xl">📁</span>
+                      <span className="flex-1 text-sm font-medium text-text-primary truncate">{folder.name}</span>
+                      <span className="text-xs text-text-muted">{folder.date}</span>
                     </div>
-                  )
-                )}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Files */}
+          {/* Files - Grid */}
           {files.length > 0 && is_grid && (
             <div className="px-3 pb-3">
               <div className={`grid ${VIEW_CLASS[current_view]} gap-2`}>
@@ -560,38 +578,38 @@ export default function BrowsePage() {
                         window.open(`/file/raw/${encodeURIComponent(file.path)}`, "_blank");
                       }
                     }}
-                    className={`flex flex-col items-center rounded-xl p-3 text-center transition hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                      selected_paths.has(file.path) ? "ring-2 ring-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : ""
-                    }`}
+                    className={`relative flex flex-col items-center rounded-xl p-3 text-center transition-all hover:bg-bg-card-hover active:scale-[0.98] ${selected_class(file.path)}`}
                   >
                     {selection_mode && (
                       <input
                         type="checkbox"
                         checked={selected_paths.has(file.path)}
                         onChange={() => toggle_select_item(file.path)}
-                        className="mb-1"
+                        className="mb-1 accent-accent"
                         onClick={(e) => e.stopPropagation()}
                       />
                     )}
                     <span className="text-3xl mb-1">{file.icon}</span>
                     {file.is_video && (
-                      <span className="absolute top-2 right-2 rounded bg-black/60 px-1 text-[10px] text-white">▶</span>
+                      <span className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-accent/80 text-[10px] text-white">
+                        ▶
+                      </span>
                     )}
-                    <span className="text-xs text-zinc-700 text-center break-all line-clamp-2 dark:text-zinc-300">
+                    <span className="text-xs font-medium text-text-primary break-all line-clamp-2">
                       {file.name}
                     </span>
-                    <span className="text-[10px] text-zinc-400 mt-0.5">{file.date}</span>
-                    <span className="text-[10px] text-zinc-400">{file.size}</span>
+                    <span className="text-[10px] text-text-muted mt-0.5">{file.date}</span>
+                    <span className="text-[10px] text-text-muted">{file.size}</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
 
+          {/* Files - List */}
           {files.length > 0 && !is_grid && (
             <div className="pb-3">
-              {/* List header */}
-              <div className="flex items-center gap-3 border-b border-zinc-200 px-4 py-2 text-xs font-medium text-zinc-400 dark:border-zinc-800">
+              <div className="flex items-center gap-3 border-b border-border-primary px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-text-muted">
                 {selection_mode && <span className="w-5 shrink-0" />}
                 <span className="w-8 shrink-0" />
                 <span className="flex-1">名称</span>
@@ -614,9 +632,7 @@ export default function BrowsePage() {
                       window.open(`/file/raw/${encodeURIComponent(file.path)}`, "_blank");
                     }
                   }}
-                  className={`flex cursor-pointer items-center gap-3 border-b border-zinc-100 px-4 py-2 transition hover:bg-zinc-50 dark:border-zinc-800/50 dark:hover:bg-zinc-800/50 ${
-                    selected_paths.has(file.path) ? "ring-2 ring-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : ""
-                  }`}
+                  className={`flex cursor-pointer items-center gap-3 border-b border-border-primary/50 px-4 py-2.5 transition-all hover:bg-bg-card-hover ${selected_class(file.path)}`}
                 >
                   {selection_mode && (
                     <input
@@ -624,31 +640,24 @@ export default function BrowsePage() {
                       checked={selected_paths.has(file.path)}
                       onChange={() => toggle_select_item(file.path)}
                       onClick={(e) => e.stopPropagation()}
-                      className="w-5 shrink-0"
+                      className="w-5 shrink-0 accent-accent"
                     />
                   )}
                   <span className="w-8 shrink-0 text-xl text-center">{file.icon}</span>
-                  <span className="flex-1 truncate text-sm text-zinc-700 dark:text-zinc-300">{file.name}</span>
-                  <span className="w-36 shrink-0 text-xs text-zinc-400">{file.date}</span>
-                  <span className="w-20 shrink-0 text-right text-xs text-zinc-400">{file.size}</span>
+                  <span className="flex-1 truncate text-sm font-medium text-text-primary">{file.name}</span>
+                  <span className="w-36 shrink-0 text-xs text-text-muted">{file.date}</span>
+                  <span className="w-20 shrink-0 text-right text-xs text-text-muted">{file.size}</span>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Sentinel for infinite scroll */}
           <div ref={sentinel_ref} className="h-1" />
 
-          {/* Loading */}
-          {is_loading && (
-            <div className="flex justify-center py-8">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-indigo-500" />
-            </div>
-          )}
+          {is_loading && <Spinner />}
 
-          {/* End message */}
           {!has_more && files.length > 0 && (
-            <p className="py-6 text-center text-xs text-zinc-300 dark:text-zinc-700">已加载全部内容</p>
+            <p className="py-6 text-center text-[11px] text-text-muted">已加载全部内容</p>
           )}
         </div>
       </div>
