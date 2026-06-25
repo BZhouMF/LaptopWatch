@@ -35,25 +35,50 @@ def _format_video(row):
 
 
 def _pick_random_video(exclude_paths):
-    """从 DB 遍历文件夹取一条视频，排除已播放路径
+    """从 DB 取一条视频，排除已播放路径
 
+    DOUYIN_RANDOM_MEDIA=True 时使用 ORDER BY RANDOM() 真随机，
+    否则按排序顺序遍历。
     返回 dict 或 None
     """
     try:
         if not config.DB_PATH or not config.MEDIA_DIR:
             return None
 
-        from utils.db_utils import get_db, traverse_media
+        from utils.db_utils import get_db, get_random_media, traverse_media
 
         conn = get_db()
         is_random = config.DOUYIN_RANDOM_MEDIA
+
+        if is_random:
+            from utils.db_utils import init_tables, sync_folder
+            init_tables(conn)
+            sync_folder(conn, str(config.MEDIA_DIR))
+            rows = get_random_media(
+                conn, 'video', limit=1,
+                exclude_paths=exclude_paths,
+                media_dir=str(config.MEDIA_DIR),
+            )
+            conn.close()
+            if not rows:
+                return None
+            row = rows[0]
+            import os as _os
+            media_dir_str = str(config.MEDIA_DIR).replace('\\', '/') + '/'
+            rel_path = row['path'].replace('\\', '/').replace(media_dir_str, '', 1)
+            return {
+                'name': row['name'],
+                'path': row['path'],
+                'relative_path': rel_path,
+                'is_video': True,
+            }
 
         rows, _, _ = traverse_media(
             conn, str(config.MEDIA_DIR), 'video',
             offset=0, limit=1,
             sort_type=config.SORT_TYPE,
             sort_order=config.SORT_ORDER,
-            random_start=is_random,
+            random_start=False,
             exclude_paths=exclude_paths,
         )
         conn.close()

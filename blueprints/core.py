@@ -113,7 +113,7 @@ def api_start_service():
         config.SORT_ORDER = sort_order
 
     config.RANDOM_MODE = settings.get('random', False)
-    config.DOUYIN_RANDOM_MEDIA = settings.get('douyin_random', False)
+    config.DOUYIN_RANDOM_MEDIA = settings.get('douyin_random', True)
     config.CATEGORY_BROWSE = settings.get('category_browse', False)
 
     from utils.process_utils import get_local_ip

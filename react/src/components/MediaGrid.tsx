@@ -155,7 +155,7 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
+            <div className="grid max-w-[1262px] mx-auto grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3">
               {items.map((item) => (
                 <button
                   key={item.relative_path}

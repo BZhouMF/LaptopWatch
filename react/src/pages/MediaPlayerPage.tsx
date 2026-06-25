@@ -47,10 +47,13 @@ export default function MediaPlayerPage(): JSX.Element {
   const progress_ref = useRef<HTMLDivElement>(null);
   const controls_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const safety_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transition_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abort_ref = useRef<AbortController | null>(null);
   const seek_base_ref = useRef(0);
   const is_fullscreen_ref = useRef(false);
   const indicator_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preload_pending_ref = useRef(false);
+  const is_fetching_ref = useRef(false);
 
   // State proxy refs (for event handlers to avoid stale closures)
   const state_ref = useRef({
@@ -58,6 +61,10 @@ export default function MediaPlayerPage(): JSX.Element {
     is_dragging: false,
     selected_speed: 1,
   });
+
+  // Buffer ref — updated synchronously so get_active_video/get_inactive_video
+  // never read a stale buffer after finish_video_switch swaps before React re-renders
+  const active_buffer_ref = useRef<"A" | "B">("A");
 
   // ── Player state ───────────────────────────────────
   const [status, set_status] = useState<PlayerStatus>("loading");
@@ -79,7 +86,7 @@ export default function MediaPlayerPage(): JSX.Element {
 
   // Dual-buffer control: always read from refs, use state only for rendering triggers
   const [active_buffer, set_active_buffer] = useState<"A" | "B">("A");
-  const [slide_anim, set_slide_anim] = useState<{ direction: "next" | "prev"; active: boolean } | null>(null);
+  const [slide_anim, set_slide_anim] = useState<{ direction: "next" | "prev"; phase: "start" | "animating" } | null>(null);
   const [video_a_src, set_video_a_src] = useState("");
   const [video_b_src, set_video_b_src] = useState("");
   const [show_video, set_show_video] = useState(true);
@@ -93,6 +100,7 @@ export default function MediaPlayerPage(): JSX.Element {
   const handle_nav_next_ref = useRef<() => void>(() => {});
   const fetch_douyin_next_ref = useRef<() => void>(() => {});
   const animate_slide_in_ref = useRef<(direction: "next" | "prev") => void>(() => {});
+  const preload_next_ref = useRef<() => void>(() => {});
 
   // Grid state
   const grid_path_ref = useRef("");
@@ -100,11 +108,11 @@ export default function MediaPlayerPage(): JSX.Element {
 
   // ── Helper: get active/inactive video refs ──────────
   const get_active_video = useCallback(() =>
-    active_buffer === "A" ? video_a_ref.current : video_b_ref.current,
-  [active_buffer]);
+    active_buffer_ref.current === "A" ? video_a_ref.current : video_b_ref.current,
+  []);
   const get_inactive_video = useCallback(() =>
-    active_buffer === "A" ? video_b_ref.current : video_a_ref.current,
-  [active_buffer]);
+    active_buffer_ref.current === "A" ? video_b_ref.current : video_a_ref.current,
+  []);
 
   // ── Controls timer ──────────────────────────────────
   const reset_controls_timer = useCallback(() => {
@@ -140,9 +148,41 @@ export default function MediaPlayerPage(): JSX.Element {
   }, [get_active_video, update_progress]);
 
   // ── Fullscreen ──────────────────────────────────────
+  const force_video_repaint = useCallback((video: HTMLVideoElement) => {
+    if (!video) return;
+    // Skip on touch devices — native fullscreen handles rendering correctly
+    if (navigator.maxTouchPoints > 0) return;
+    video.style.display = "none";
+    video.offsetHeight;
+    requestAnimationFrame(() => {
+      if (!document.fullscreenElement && !(document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement) return;
+      video.style.display = "block";
+      video.style.width = (screen.width - 1) + "px";
+      video.style.height = (screen.height - 1) + "px";
+      video.offsetHeight;
+      requestAnimationFrame(() => {
+        if (!document.fullscreenElement && !(document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement) return;
+        video.style.width = "100%";
+        video.style.height = "100%";
+      });
+    });
+  }, []);
+
   const update_fullscreen_state = useCallback(() => {
     const fs = !!(document.fullscreenElement || (document as unknown as { webkitFullscreenElement?: Element }).webkitFullscreenElement);
     set_is_fullscreen(fs);
+    if (!fs) {
+      // 退出全屏：恢复视频 CSS（来自原始 onFullscreenChange 逻辑）
+      [video_a_ref.current, video_b_ref.current].forEach((v) => {
+        if (!v) return;
+        v.style.willChange = "";
+        v.style.display = "";
+        v.style.width = "";
+        v.style.height = "";
+      });
+      set_vol_indicator({ active: false, pct: 100 });
+      set_bright_indicator({ active: false, pct: 100 });
+    }
   }, []);
 
   const toggle_fullscreen = useCallback(() => {
@@ -168,80 +208,118 @@ export default function MediaPlayerPage(): JSX.Element {
       update_fullscreen_state();
       return;
     }
-    // Container fullscreen
+    // Container fullscreen：清除 GPU 合成层诱因（来自原始 enterContainerFullscreen）
+    const active = get_active_video();
+    const inactive = get_inactive_video();
+    if (active) {
+      active.style.willChange = "auto";
+      active.style.transform = "";
+    }
+    if (inactive) {
+      inactive.style.willChange = "auto";
+      inactive.style.transform = "";
+    }
     const el = container_ref.current;
     if (el) {
       const promise = el.requestFullscreen ? el.requestFullscreen() :
         (el as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen?.();
-      promise?.catch(() => {});
+      promise?.then(() => {
+        if (active) force_video_repaint(active);
+      }).catch(() => {});
     }
-  }, [get_active_video, update_fullscreen_state]);
+  }, [get_active_video, get_inactive_video, update_fullscreen_state, force_video_repaint]);
 
   // ── Video switching ─────────────────────────────────
   const finish_video_switch = useCallback(() => {
+    if (!state_ref.current.is_transitioning) return;
     if (safety_timer_ref.current) {
       clearTimeout(safety_timer_ref.current);
       safety_timer_ref.current = null;
     }
+    if (transition_timer_ref.current) {
+      clearTimeout(transition_timer_ref.current);
+      transition_timer_ref.current = null;
+    }
+    // Clear CSS transitions and transforms
+    const old_active = get_active_video();
+    const old_inactive = get_inactive_video();
+    if (old_inactive) {
+      old_inactive.style.transition = "";
+      old_inactive.style.transform = "";
+    }
+    if (old_active) {
+      old_active.pause();
+      old_active.style.transition = "";
+      old_active.style.transform = "";
+    }
+    // Swap buffers: the inactive video becomes active
+    const new_active_buffer = active_buffer_ref.current === "A" ? "B" : "A";
+    active_buffer_ref.current = new_active_buffer;
+    set_active_buffer(new_active_buffer);
     set_slide_anim(null);
-    const inactive = get_inactive_video();
-    const active = get_active_video();
-    if (inactive) {
-      inactive.style.transition = "";
-      inactive.style.transform = "";
-    }
-    if (active) {
-      active.pause();
-      active.style.transition = "";
-      active.style.transform = "";
-    }
-    set_active_buffer((prev) => (prev === "A" ? "B" : "A"));
-    // Clear old buffer source after swap
+    // Clear the old buffer's src (now the new inactive) to free memory
     setTimeout(() => {
-      if (active_buffer === "A") set_video_b_src("");
+      if (new_active_buffer === "A") set_video_b_src("");
       else set_video_a_src("");
     }, 200);
+    // Play the new active video
+    const new_active = new_active_buffer === "A" ? video_a_ref.current : video_b_ref.current;
+    if (new_active) {
+      new_active.muted = is_muted;
+      new_active.playbackRate = selected_speed;
+      new_active.play().catch(() => {});
+    }
     state_ref.current.is_transitioning = false;
-  }, [get_active_video, get_inactive_video, active_buffer]);
+    set_is_playing(true);
+    // Trigger preload for the next video after transition
+    if (!is_grid) {
+      setTimeout(() => preload_next_ref.current(), 0);
+    }
+  }, [get_active_video, get_inactive_video, is_muted, selected_speed, is_grid]);
 
   const animate_slide_in = useCallback((direction: "next" | "prev") => {
-    if (state_ref.current.is_transitioning) return;
     state_ref.current.is_transitioning = true;
     // Mute active video during transition
     const active = get_active_video();
     if (active) active.muted = true;
 
-    set_slide_anim({ direction, active: true });
+    set_slide_anim({ direction, phase: "start" });
 
+    // Set up primary completion: transitionend event on the incoming video
+    const incoming = get_inactive_video();
+    const cleanup_transitionend = () => {
+      clearTimeout(fallback_timer);
+      if (incoming) {
+        incoming.removeEventListener("transitionend", on_transitionend);
+        (incoming as HTMLVideoElement & { _transitionend_fired?: boolean })._transitionend_fired = true;
+      }
+    };
+    const on_transitionend = () => {
+      cleanup_transitionend();
+      finish_video_switch();
+    };
+    if (incoming) {
+      incoming.addEventListener("transitionend", on_transitionend, { once: true });
+    }
+
+    // Fallback timer at 400ms
+    const fallback_timer = setTimeout(() => {
+      cleanup_transitionend();
+      finish_video_switch();
+    }, 400);
+
+    // Safety timer at 1500ms
     if (safety_timer_ref.current) clearTimeout(safety_timer_ref.current);
     safety_timer_ref.current = setTimeout(() => {
-      const active_v = get_active_video();
-      const inactive_v = get_inactive_video();
-      if (active_v) {
-        active_v.style.transition = "";
-        active_v.style.transform = "";
-      }
-      if (inactive_v) {
-        inactive_v.style.transition = "";
-        inactive_v.style.transform = "";
-      }
-      set_active_buffer((prev) => (prev === "A" ? "B" : "A"));
-      const now_active = active_buffer === "A" ? video_b_ref.current : video_a_ref.current;
-      if (now_active) {
-        now_active.muted = is_muted;
-        now_active.playbackRate = selected_speed;
-        now_active.play().catch(() => {});
-      }
-      set_slide_anim(null);
-      state_ref.current.is_transitioning = false;
-      set_is_playing(true);
+      clearTimeout(fallback_timer);
+      cleanup_transitionend();
+      finish_video_switch();
     }, 1500);
-  }, [get_active_video, get_inactive_video, active_buffer, is_muted, selected_speed]);
+  }, [get_active_video, get_inactive_video, finish_video_switch]);
 
   const play_media = useCallback((media: MediaData, direction: "next" | "prev" | null) => {
     if (state_ref.current.is_transitioning) return;
     set_current_media(media);
-    set_status("loading");
     set_error_msg("");
 
     if (!media.is_video) {
@@ -254,57 +332,84 @@ export default function MediaPlayerPage(): JSX.Element {
     const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
 
     if (!direction) {
-      // First load: set active buffer directly
-      if (active_buffer === "A") set_video_a_src(url);
+      // First load: load into active buffer — matching original playVideo(null)
+      const active = get_active_video();
+      const inactive = get_inactive_video();
+      if (active) {
+        active.src = url;
+        active.muted = is_muted;
+        active.playbackRate = selected_speed;
+        active.style.zIndex = "2";
+        active.play().catch(() => {});
+      }
+      if (inactive) inactive.style.zIndex = "1";
+      // Sync React state for rendering
+      if (active_buffer_ref.current === "A") set_video_a_src(url);
       else set_video_b_src(url);
+      set_is_playing(true);
       return;
     }
 
-    // Transition: load into inactive buffer
+    // Transition: load into inactive buffer — matching original playVideo(transition)
     state_ref.current.is_transitioning = true;
-    if (active_buffer === "A") set_video_b_src(url);
-    else set_video_a_src(url);
+    const inactive = get_inactive_video();
+    if (!inactive) return;
 
-    // Wait for canplay then animate
+    // Set muted + playbackRate BEFORE setting src (original lines 497-499)
+    inactive.muted = is_muted;
+    inactive.playbackRate = selected_speed;
+    inactive.src = url;
+    // Sync React state
+    if (active_buffer_ref.current === "A") set_video_b_src(url);
+    else set_video_a_src(url);
+    // Hide loading immediately after setting src (original line 500)
+    set_status("playing");
+
+    let canplay_fired = false;
     const handle_canplay = () => {
-      const inactive = get_inactive_video();
-      if (inactive) {
-        inactive.removeEventListener("canplay", handle_canplay);
-        inactive.muted = is_muted;
-        inactive.playbackRate = selected_speed;
+      canplay_fired = true;
+      inactive.removeEventListener("canplay", handle_canplay);
+      if (transition_timer_ref.current) {
+        clearTimeout(transition_timer_ref.current);
+        transition_timer_ref.current = null;
       }
       animate_slide_in(direction);
     };
 
-    // Safety timeout
-    const timer = setTimeout(() => {
-      const inactive = get_inactive_video();
-      if (inactive) inactive.removeEventListener("canplay", handle_canplay);
-      if (state_ref.current.is_transitioning) animate_slide_in(direction);
-    }, 600);
+    inactive.addEventListener("canplay", handle_canplay);
 
-    const inactive = get_inactive_video();
-    if (inactive) {
-      inactive.addEventListener("canplay", () => {
-        clearTimeout(timer);
-        handle_canplay();
-      }, { once: true });
-    }
-  }, [active_buffer, get_inactive_video, is_muted, selected_speed, animate_slide_in]);
+    // 500ms fallback timer (matching original)
+    transition_timer_ref.current = setTimeout(() => {
+      transition_timer_ref.current = null;
+      if (state_ref.current.is_transitioning && !canplay_fired) {
+        inactive.removeEventListener("canplay", handle_canplay);
+        animate_slide_in(direction);
+      }
+    }, 500);
+  }, [get_active_video, get_inactive_video, is_muted, selected_speed, animate_slide_in]);
 
   // ── Video events setup ──────────────────────────────
   const setup_video_events = useCallback((video: HTMLVideoElement) => {
-    const on_loaded = () => { set_duration(video.duration); set_current_time(0); };
+    const is_active = () =>
+      (active_buffer_ref.current === "A" && video === video_a_ref.current) ||
+      (active_buffer_ref.current === "B" && video === video_b_ref.current);
+
+    const on_loaded = () => { if (is_active()) { set_duration(video.duration); set_current_time(0); } };
     const on_time = () => {
-      if (!state_ref.current.is_dragging) {
+      if (!state_ref.current.is_dragging && is_active()) {
         set_current_time(video.currentTime);
         set_duration(video.duration);
       }
     };
-    const on_play = () => { set_is_playing(true); show_controls(); };
-    const on_pause = () => { set_is_playing(false); show_controls(); };
-    const on_waiting = () => { if (!video.paused) set_status("loading"); };
-    const on_canplay = () => { set_status("playing"); set_is_playing(!video.paused); };
+    const on_play = () => { if (is_active()) { set_is_playing(true); show_controls(); } };
+    const on_pause = () => { if (is_active()) { set_is_playing(false); show_controls(); } };
+    const on_waiting = () => { if (!video.paused && is_active()) set_status("loading"); };
+    const on_canplay = () => {
+      if (is_active()) {
+        set_status("playing");
+        set_is_playing(!video.paused);
+      }
+    };
     const on_ended = () => {
       if (!is_grid) {
         handle_nav_next_ref.current();
@@ -363,10 +468,11 @@ export default function MediaPlayerPage(): JSX.Element {
   useEffect(() => { is_fullscreen_ref.current = is_fullscreen; }, [is_fullscreen]);
   useEffect(() => { history_index_ref.current = history_index; }, [history_index]);
   useEffect(() => { play_history_ref.current = play_history; }, [play_history]);
+  useEffect(() => { active_buffer_ref.current = active_buffer; }, [active_buffer]);
 
   // ── Navigation ──────────────────────────────────────
   const handle_nav_next = useCallback(() => {
-    if (state_ref.current.is_transitioning || status === "loading") return;
+    if (state_ref.current.is_transitioning || is_fetching_ref.current) return;
 
     if (is_grid) {
       navigate_grid("next");
@@ -388,10 +494,10 @@ export default function MediaPlayerPage(): JSX.Element {
         fetch_douyin_next_ref.current();
       }
     }
-  }, [is_grid, status, history_index, play_history, play_media]);
+  }, [is_grid, history_index, play_history, play_media]);
 
   const handle_nav_prev = useCallback(() => {
-    if (state_ref.current.is_transitioning || status === "loading") return;
+    if (state_ref.current.is_transitioning || is_fetching_ref.current) return;
 
     if (is_grid) {
       navigate_grid("prev");
@@ -400,14 +506,16 @@ export default function MediaPlayerPage(): JSX.Element {
       if (cur_idx > 0) {
         const prev_idx = cur_idx - 1;
         set_history_index(prev_idx);
+        preload_index_ref.current = -1;
         play_media(play_history_ref.current[prev_idx], "prev");
       }
     }
-  }, [is_grid, status, play_media]);
+  }, [is_grid, play_media]);
 
   // ── Grid navigation ─────────────────────────────────
   const navigate_grid = useCallback(async (direction: "next" | "prev") => {
     if (!grid_path_ref.current) return;
+    is_fetching_ref.current = true;
     set_status("loading");
     try {
       const resp = await api_client.get<{ code: number; data: MediaData }>("/media/navigate", {
@@ -435,30 +543,73 @@ export default function MediaPlayerPage(): JSX.Element {
       set_error_msg("导航失败");
       setTimeout(() => set_error_msg(""), 3000);
     } finally {
+      is_fetching_ref.current = false;
       if (status === "loading") set_status("playing");
     }
   }, [play_media, status]);
 
-  // ── Douyin API ──────────────────────────────────────
-  const fetch_douyin_init = useCallback(async () => {
-    set_status("loading");
-    try {
-      const resp = await api_client.get<{ code: number; data: MediaData }>("/api/douyin/init", { timeout: 8000 });
-      if (resp.data.code === 0 && resp.data.data) {
-        set_play_history([resp.data.data]);
-        set_history_index(0);
-        play_media(resp.data.data, null);
-        return;
+  // ── Preload next (douyin mode) ──────────────────────
+  const preload_next = useCallback(async () => {
+    if (is_grid || state_ref.current.is_transitioning || preload_pending_ref.current) return;
+    const cur_idx = history_index_ref.current;
+    const cur_history = play_history_ref.current;
+    const next_idx = cur_idx + 1;
+    if (next_idx < cur_history.length) {
+      preload_index_ref.current = next_idx;
+      const url = `/media/serve_media/${encodeURIComponent(cur_history[next_idx].relative_path)}`;
+      const inactive = get_inactive_video();
+      if (inactive) {
+        inactive.muted = is_muted;
+        inactive.playbackRate = selected_speed;
+        inactive.src = url;
       }
-    } catch { /* fallback to next */ }
-    fetch_douyin_next();
-  }, [play_media]);
+      // Sync React state for rendering
+      if (active_buffer_ref.current === "A") set_video_b_src(url);
+      else set_video_a_src(url);
+      return;
+    }
+    preload_pending_ref.current = true;
+    try {
+      const resp = await api_client.get<{ code: number; data: MediaData }>("/api/douyin/next");
+      // Re-check after await: a transition may have started while we were fetching
+      if (state_ref.current.is_transitioning) return;
+      if (resp.data.code === 0 && resp.data.data) {
+        set_play_history((prev) => {
+          // Avoid duplicating the same video in history
+          const existing_idx = prev.findIndex((m) => m.relative_path === resp.data.data.relative_path);
+          if (existing_idx >= 0 && existing_idx >= cur_idx) {
+            preload_index_ref.current = existing_idx;
+            return prev;
+          }
+          const next = [...prev, resp.data.data];
+          preload_index_ref.current = next.length - 1;
+          return next;
+        });
+        const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
+        const inactive = get_inactive_video();
+        if (inactive) {
+          inactive.muted = is_muted;
+          inactive.playbackRate = selected_speed;
+          inactive.src = url;
+        }
+        // Sync React state for rendering
+        if (active_buffer_ref.current === "A") set_video_b_src(url);
+        else set_video_a_src(url);
+      }
+    } catch { /* ignore */ }
+    finally { preload_pending_ref.current = false; }
+  }, [is_grid, is_muted, selected_speed, get_inactive_video]);
 
+  // ── Douyin API ──────────────────────────────────────
   const fetch_douyin_next = useCallback(async () => {
     if (state_ref.current.is_transitioning) return;
+    preload_pending_ref.current = true;
+    is_fetching_ref.current = true;
     set_status("loading");
     try {
       const resp = await api_client.get<{ code: number; data: MediaData; msg?: string }>("/api/douyin/next", { timeout: 8000 });
+      // Re-check: a transition may have started during the fetch
+      if (state_ref.current.is_transitioning) return;
       if (resp.data.code === 0 && resp.data.data) {
         const cur_idx = history_index_ref.current;
         set_play_history((prev) => {
@@ -479,8 +630,27 @@ export default function MediaPlayerPage(): JSX.Element {
     } catch {
       set_status("error");
       set_error_msg("网络错误");
+    } finally {
+      preload_pending_ref.current = false;
+      is_fetching_ref.current = false;
     }
   }, [play_media]);
+
+  const fetch_douyin_init = useCallback(async () => {
+    set_status("loading");
+    try {
+      const resp = await api_client.get<{ code: number; data: MediaData }>("/api/douyin/init", { timeout: 8000 });
+      if (resp.data.code === 0 && resp.data.data) {
+        set_play_history([resp.data.data]);
+        set_history_index(0);
+        play_media(resp.data.data, null);
+        // Preload next video immediately (matching original's preloadNextVideo call)
+        preload_next();
+        return;
+      }
+    } catch { /* fallback to next */ }
+    fetch_douyin_next();
+  }, [play_media, fetch_douyin_next, preload_next]);
 
   // ── Initialize ──────────────────────────────────────
   useEffect(() => {
@@ -508,40 +678,22 @@ export default function MediaPlayerPage(): JSX.Element {
     show_controls();
   }, []);
 
-  // ── Preload next (douyin mode) ──────────────────────
-  const preload_next = useCallback(async () => {
-    if (is_grid || state_ref.current.is_transitioning) return;
-    const cur_idx = history_index_ref.current;
-    const cur_history = play_history_ref.current;
-    const next_idx = cur_idx + 1;
-    if (next_idx < cur_history.length) {
-      preload_index_ref.current = next_idx;
-      const url = `/media/serve_media/${encodeURIComponent(cur_history[next_idx].relative_path)}`;
-      if (active_buffer === "A") set_video_b_src(url);
-      else set_video_a_src(url);
-      return;
-    }
-    try {
-      const resp = await api_client.get<{ code: number; data: MediaData }>("/api/douyin/next");
-      if (resp.data.code === 0 && resp.data.data) {
-        set_play_history((prev) => {
-          const next = [...prev, resp.data.data];
-          preload_index_ref.current = next.length - 1;
-          return next;
-        });
-        const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
-        if (active_buffer === "A") set_video_b_src(url);
-        else set_video_a_src(url);
-      }
-    } catch { /* ignore */ }
-  }, [is_grid, active_buffer]);
-
   useEffect(() => { if (!is_grid) preload_next(); }, [history_index, play_history.length]);
 
   // Sync refs for functions referenced in event handlers (avoids stale closures)
   useEffect(() => { handle_nav_next_ref.current = handle_nav_next; }, [handle_nav_next]);
   useEffect(() => { fetch_douyin_next_ref.current = fetch_douyin_next; }, [fetch_douyin_next]);
   useEffect(() => { animate_slide_in_ref.current = animate_slide_in; }, [animate_slide_in]);
+  useEffect(() => { preload_next_ref.current = preload_next; }, [preload_next]);
+
+  // Transition slide animation from "start" to "animating" phase
+  useEffect(() => {
+    if (slide_anim?.phase !== "start") return;
+    const raf = requestAnimationFrame(() => {
+      set_slide_anim({ direction: slide_anim.direction, phase: "animating" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [slide_anim]);
 
   // ── Actions ─────────────────────────────────────────
   const toggle_play = useCallback(() => {
@@ -689,39 +841,27 @@ export default function MediaPlayerPage(): JSX.Element {
   const slide_a_style: React.CSSProperties = {};
   const slide_b_style: React.CSSProperties = {};
 
-  if (slide_anim?.active) {
+  if (slide_anim) {
     const is_a_active = active_buffer === "A";
     const from_y = slide_anim.direction === "next" ? "translateY(100%)" : "translateY(-100%)";
     const out_y = slide_anim.direction === "next" ? "translateY(-100%)" : "translateY(100%)";
     const trans = "transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
+    const is_start = slide_anim.phase === "start";
 
     if (is_a_active) {
       slide_a_style.transform = out_y;
       slide_a_style.transition = trans;
       slide_a_style.zIndex = 1;
-      slide_b_style.transform = from_y;
-      slide_b_style.transition = "none";
+      slide_b_style.transform = is_start ? from_y : "translateY(0)";
+      slide_b_style.transition = is_start ? "none" : trans;
       slide_b_style.zIndex = 2;
-      // Trigger reflow then animate
-      setTimeout(() => {
-        if (video_b_ref.current) {
-          video_b_ref.current.style.transition = trans;
-          video_b_ref.current.style.transform = "translateY(0)";
-        }
-      }, 16);
     } else {
       slide_b_style.transform = out_y;
       slide_b_style.transition = trans;
       slide_b_style.zIndex = 1;
-      slide_a_style.transform = from_y;
-      slide_a_style.transition = "none";
+      slide_a_style.transform = is_start ? from_y : "translateY(0)";
+      slide_a_style.transition = is_start ? "none" : trans;
       slide_a_style.zIndex = 2;
-      setTimeout(() => {
-        if (video_a_ref.current) {
-          video_a_ref.current.style.transition = trans;
-          video_a_ref.current.style.transform = "translateY(0)";
-        }
-      }, 16);
     }
   } else {
     if (active_buffer === "A") {
@@ -795,28 +935,29 @@ export default function MediaPlayerPage(): JSX.Element {
       {/* ─── Top Bar ────────────────────────────────── */}
       {controls_visible && (
         <div className="player-controls-area absolute top-0 left-0 right-0 z-20 flex items-center gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pt-4 pb-6">
-          <button
-            onClick={() => window.history.back()}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-white/80 transition hover:text-white hover:bg-white/10"
-          >
-            ← 返回
-          </button>
+          {is_grid && (
+            <button
+              onClick={() => {
+                if (document.fullscreenElement) toggle_fullscreen();
+                else window.history.back();
+              }}
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-white/80 transition hover:text-white hover:bg-white/10"
+            >
+              ← 返回
+            </button>
+          )}
           <span className="truncate text-sm font-medium text-white/90">{current_media?.name || ""}</span>
           <div className="ml-auto flex items-center gap-1">
-            {is_grid && (
-              <>
-                <button onClick={handle_nav_prev} className="rounded-full p-2 text-white/70 transition hover:text-white hover:bg-white/10">
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                  </svg>
-                </button>
-                <button onClick={handle_nav_next} className="rounded-full p-2 text-white/70 transition hover:text-white hover:bg-white/10">
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-              </>
-            )}
+            <button onClick={handle_nav_prev} className="rounded-full p-2 text-white/70 transition hover:text-white hover:bg-white/10">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+              </svg>
+            </button>
+            <button onClick={handle_nav_next} className="rounded-full p-2 text-white/70 transition hover:text-white hover:bg-white/10">
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
           </div>
         </div>
       )}

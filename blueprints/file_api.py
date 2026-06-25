@@ -123,7 +123,8 @@ def download_folder():
             try:
                 os.unlink(zip_path)
             except Exception as e:
-                logger.debug(f"清理临时文件失败 {zip_path}: {e}")
+                from utils.logging_utils import logger as _cleanup_logger
+                _cleanup_logger.debug(f"清理临时文件失败 {zip_path}: {e}")
             return response
 
         folder_name = os.path.basename(abs_path)
@@ -218,7 +219,8 @@ def download_selected():
             try:
                 os.unlink(zip_path)
             except Exception as e:
-                logger.debug(f"清理临时文件失败 {zip_path}: {e}")
+                from utils.logging_utils import logger as _cleanup_logger
+                _cleanup_logger.debug(f"清理临时文件失败 {zip_path}: {e}")
             return response
         folder_name = os.path.basename(base_abs) + '_下载' if base_abs else '下载'
         try:
