@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api_client from "../api/client";
 import MediaGrid from "../components/MediaGrid";
 import CategoryBrowsePage from "./CategoryBrowsePage";
+import MediaPlayerPage from "./MediaPlayerPage";
 
 interface ModeConfig {
   run_mode: string;
@@ -98,11 +99,7 @@ export default function HomePage() {
       return <CategoryBrowsePage />;
     }
     if (mode_config.run_mode === "douyin") {
-      return (
-        <div className="flex flex-1 items-center justify-center">
-          <p className="text-text-muted">抖音模式 - 即将实现</p>
-        </div>
-      );
+      return <MediaPlayerPage />;
     }
     const mode_label = mode_config.run_mode === "video" ? "视频模式" : "图片模式";
     return (

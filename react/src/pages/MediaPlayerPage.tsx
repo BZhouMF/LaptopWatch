@@ -88,6 +88,11 @@ export default function MediaPlayerPage(): JSX.Element {
   const [play_history, set_play_history] = useState<MediaData[]>([]);
   const [history_index, set_history_index] = useState(-1);
   const preload_index_ref = useRef(-1);
+  const history_index_ref = useRef(-1);
+  const play_history_ref = useRef<MediaData[]>([]);
+  const handle_nav_next_ref = useRef<() => void>(() => {});
+  const fetch_douyin_next_ref = useRef<() => void>(() => {});
+  const animate_slide_in_ref = useRef<(direction: "next" | "prev") => void>(() => {});
 
   // Grid state
   const grid_path_ref = useRef("");
@@ -302,7 +307,7 @@ export default function MediaPlayerPage(): JSX.Element {
     const on_canplay = () => { set_status("playing"); set_is_playing(!video.paused); };
     const on_ended = () => {
       if (!is_grid) {
-        handle_nav_next();
+        handle_nav_next_ref.current();
       } else {
         video.currentTime = 0;
         video.play().catch(() => {});
@@ -334,7 +339,7 @@ export default function MediaPlayerPage(): JSX.Element {
       video.removeEventListener("ended", on_ended);
       video.removeEventListener("error", on_err);
     };
-  }, [!is_grid, show_controls]);
+  }, [is_grid, show_controls]);
 
   // Attach events to both video elements
   useEffect(() => {
@@ -356,6 +361,8 @@ export default function MediaPlayerPage(): JSX.Element {
   }, [update_fullscreen_state]);
 
   useEffect(() => { is_fullscreen_ref.current = is_fullscreen; }, [is_fullscreen]);
+  useEffect(() => { history_index_ref.current = history_index; }, [history_index]);
+  useEffect(() => { play_history_ref.current = play_history; }, [play_history]);
 
   // ── Navigation ──────────────────────────────────────
   const handle_nav_next = useCallback(() => {
@@ -368,10 +375,17 @@ export default function MediaPlayerPage(): JSX.Element {
       if (history_index < play_history.length - 1) {
         const next_idx = history_index + 1;
         set_history_index(next_idx);
-        set_status("ended");
-        play_media(play_history[next_idx], "next");
+        // Use preloaded buffer if available to skip reloading
+        if (preload_index_ref.current === next_idx) {
+          const media = play_history[next_idx];
+          set_current_media(media);
+          set_status("playing");
+          animate_slide_in_ref.current("next");
+        } else {
+          play_media(play_history[next_idx], "next");
+        }
       } else {
-        fetch_douyin_next();
+        fetch_douyin_next_ref.current();
       }
     }
   }, [is_grid, status, history_index, play_history, play_media]);
@@ -382,13 +396,14 @@ export default function MediaPlayerPage(): JSX.Element {
     if (is_grid) {
       navigate_grid("prev");
     } else {
-      if (history_index > 0) {
-        const prev_idx = history_index - 1;
+      const cur_idx = history_index_ref.current;
+      if (cur_idx > 0) {
+        const prev_idx = cur_idx - 1;
         set_history_index(prev_idx);
-        play_media(play_history[prev_idx], "prev");
+        play_media(play_history_ref.current[prev_idx], "prev");
       }
     }
-  }, [is_grid, status, history_index, play_history, play_media]);
+  }, [is_grid, status, play_media]);
 
   // ── Grid navigation ─────────────────────────────────
   const navigate_grid = useCallback(async (direction: "next" | "prev") => {
@@ -445,14 +460,14 @@ export default function MediaPlayerPage(): JSX.Element {
     try {
       const resp = await api_client.get<{ code: number; data: MediaData; msg?: string }>("/api/douyin/next", { timeout: 8000 });
       if (resp.data.code === 0 && resp.data.data) {
+        const cur_idx = history_index_ref.current;
         set_play_history((prev) => {
-          const next = prev.slice(0, history_index + 1);
+          const next = prev.slice(0, cur_idx + 1);
           next.push(resp.data.data);
           if (next.length > 100) next.shift();
           return next;
         });
-        const new_idx = Math.min(history_index + 1, play_history.length);
-        set_history_index(new_idx);
+        set_history_index(cur_idx + 1);
         play_media(resp.data.data, "next");
       } else if (resp.data.code === 2) {
         set_status("ended");
@@ -465,7 +480,7 @@ export default function MediaPlayerPage(): JSX.Element {
       set_status("error");
       set_error_msg("网络错误");
     }
-  }, [history_index, play_history.length, play_media]);
+  }, [play_media]);
 
   // ── Initialize ──────────────────────────────────────
   useEffect(() => {
@@ -496,10 +511,12 @@ export default function MediaPlayerPage(): JSX.Element {
   // ── Preload next (douyin mode) ──────────────────────
   const preload_next = useCallback(async () => {
     if (is_grid || state_ref.current.is_transitioning) return;
-    const next_idx = history_index + 1;
-    if (next_idx < play_history.length) {
+    const cur_idx = history_index_ref.current;
+    const cur_history = play_history_ref.current;
+    const next_idx = cur_idx + 1;
+    if (next_idx < cur_history.length) {
       preload_index_ref.current = next_idx;
-      const url = `/media/serve_media/${encodeURIComponent(play_history[next_idx].relative_path)}`;
+      const url = `/media/serve_media/${encodeURIComponent(cur_history[next_idx].relative_path)}`;
       if (active_buffer === "A") set_video_b_src(url);
       else set_video_a_src(url);
       return;
@@ -507,16 +524,24 @@ export default function MediaPlayerPage(): JSX.Element {
     try {
       const resp = await api_client.get<{ code: number; data: MediaData }>("/api/douyin/next");
       if (resp.data.code === 0 && resp.data.data) {
-        set_play_history((prev) => [...prev, resp.data.data]);
-        preload_index_ref.current = play_history.length;
+        set_play_history((prev) => {
+          const next = [...prev, resp.data.data];
+          preload_index_ref.current = next.length - 1;
+          return next;
+        });
         const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
         if (active_buffer === "A") set_video_b_src(url);
         else set_video_a_src(url);
       }
     } catch { /* ignore */ }
-  }, [is_grid, history_index, play_history, active_buffer]);
+  }, [is_grid, active_buffer]);
 
   useEffect(() => { if (!is_grid) preload_next(); }, [history_index, play_history.length]);
+
+  // Sync refs for functions referenced in event handlers (avoids stale closures)
+  useEffect(() => { handle_nav_next_ref.current = handle_nav_next; }, [handle_nav_next]);
+  useEffect(() => { fetch_douyin_next_ref.current = fetch_douyin_next; }, [fetch_douyin_next]);
+  useEffect(() => { animate_slide_in_ref.current = animate_slide_in; }, [animate_slide_in]);
 
   // ── Actions ─────────────────────────────────────────
   const toggle_play = useCallback(() => {
