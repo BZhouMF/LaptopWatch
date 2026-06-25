@@ -205,6 +205,13 @@ def browse(dirpath):
     finally:
         log_access(request, 'BROWSE', dirpath, duration=time.time() - start_time)
 
+@core_bp.route('/api/drives', methods=['GET'])
+@login_required
+def api_drives():
+    """返回可用驱动器列表"""
+    return {'drives': get_drives()}
+
+
 @core_bp.route('/favicon.ico', methods=['GET'])
 def favicon():
     """空favicon响应"""
