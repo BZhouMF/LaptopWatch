@@ -21,14 +21,10 @@
         categoryBrowse: document.getElementById('categoryBrowse'),
         startServerBtn: document.getElementById('startServerBtn'),
         activateServiceBtn: document.getElementById('activateServiceBtn'),
-        stopServerBtn: document.getElementById('stopServerBtn'),
         deactivateServiceBtn: document.getElementById('deactivateServiceBtn'),
-        stopServiceBtn: document.getElementById('stopServiceBtn'),
-        applyConfigServerOnBtn: document.getElementById('applyConfigServerOnBtn'),
-        applyConfigActiveBtn: document.getElementById('applyConfigActiveBtn'),
-        btnColOff: document.getElementById('btnColOff'),
-        btnColServerOn: document.getElementById('btnColServerOn'),
-        btnColActive: document.getElementById('btnColActive'),
+        stopBtn: document.getElementById('stopBtn'),
+        stopBtnLabel: document.getElementById('stopBtnLabel'),
+        applyConfigBtn: document.getElementById('applyConfigBtn'),
         urlDisplay: document.getElementById('urlDisplay'),
         openBrowserBtn: document.getElementById('openBrowserBtn'),
         urlGroup: document.getElementById('urlGroup'),
@@ -278,27 +274,26 @@
         updateRuntimeConfig(settings).then(function (result) {
             btn.disabled = false;
             if (result.code === 0) {
+                showToast('配置已更新（版本 ' + (result.config && result.config.config_version || '?') + '）');
                 log('[运行时] 配置已更新（版本 ' + (result.config && result.config.config_version || '?') + '）', 'ok');
                 if (result.config) {
                     if (serverState === 'service_active') {
                         el.statusText.textContent = '运行中（' + (result.config.run_mode || currentMode) + '模式）';
                     }
-                    // 在 SERVER_ON 状态下保持 "服务器已启动（未激活）"
                 }
             } else {
                 log('[运行时] 配置更新失败: ' + (result.msg || '未知错误'), 'error');
+                showToast('配置更新失败');
             }
         }).catch(function (e) {
             btn.disabled = false;
             log('[运行时] 配置更新异常: ' + (e.message || e), 'error');
+            showToast('配置更新异常');
         });
     }
 
-    el.applyConfigServerOnBtn.addEventListener('click', function () {
-        _onApplyConfig(el.applyConfigServerOnBtn);
-    });
-    el.applyConfigActiveBtn.addEventListener('click', function () {
-        _onApplyConfig(el.applyConfigActiveBtn);
+    el.applyConfigBtn.addEventListener('click', function () {
+        _onApplyConfig(el.applyConfigBtn);
     });
 
     // ── 浏览按钮 ──
@@ -467,25 +462,9 @@
         });
     });
 
-    // ── 停止服务器（SERVER_ON 状态）──
-    el.stopServerBtn.addEventListener('click', function () {
-        el.stopServerBtn.disabled = true;
-        if (window.pywebview && window.pywebview.api) {
-            window.pywebview.api.stop_service().then(function () {
-                handleStop();
-            }).catch(function () {
-                handleStop();
-            });
-            return;
-        }
-        fetch('/api/stop_service', { method: 'POST' }).finally(function () {
-            handleStop();
-        });
-    });
-
-    // ── 停止服务（SERVICE_ACTIVE 状态）──
-    el.stopServiceBtn.addEventListener('click', function () {
-        el.stopServiceBtn.disabled = true;
+    // ── 停止按钮（SERVER_ON / SERVICE_ACTIVE 共用）──
+    el.stopBtn.addEventListener('click', function () {
+        el.stopBtn.disabled = true;
         if (window.pywebview && window.pywebview.api) {
             window.pywebview.api.stop_service().then(function () {
                 handleStop();
@@ -581,20 +560,36 @@
             el.statusText.textContent = '运行中（' + currentMode + '模式）';
         }
 
-        // Button visibility
-        el.btnColOff.style.display = isOff ? 'flex' : 'none';
-        el.btnColServerOn.style.display = isServerOn ? 'flex' : 'none';
-        el.btnColActive.style.display = isActive ? 'flex' : 'none';
+        // ── 按钮可见性 / 禁用 ──
+        // 启动服务器：只在 off 时可见
+        el.startServerBtn.style.display = isOff ? '' : 'none';
 
-        // Controls: mode / mediaDir / sort 运行时可改; 仅 normal 模式下部分控件禁用
+        // 激活服务：始终可见，server_on 时可点
+        el.activateServiceBtn.style.display = '';
+        el.activateServiceBtn.disabled = !isServerOn;
+
+        // 停用服务：active 时可见
+        el.deactivateServiceBtn.style.display = isActive ? '' : 'none';
+        el.deactivateServiceBtn.disabled = !isActive;
+
+        // 停止按钮：running 时可见；active 时标签为"停止服务器"，server_on 时也是"停止服务器"
+        el.stopBtn.style.display = isRunning ? '' : 'none';
+        el.stopBtn.disabled = false;
+        el.stopBtnLabel.textContent = isActive ? '停止服务' : '停止服务器';
+
+        // 更新配置：始终可见，running 时可点
+        el.applyConfigBtn.style.display = '';
+        el.applyConfigBtn.disabled = !isRunning;
+
+        // Controls: mode / mediaDir / sort 运行时可改
         modeBtns.forEach(function (b) { b.disabled = false; });
         el.mediaDir.disabled = false;
         el.browseBtn.disabled = false;
         el.sortType.disabled = false;
         el.sortOrder.disabled = false;
-        el.randomMode.disabled = isOff;
-        el.douyinRandom.disabled = isOff;
-        el.categoryBrowse.disabled = isOff;
+        el.randomMode.disabled = false;
+        el.douyinRandom.disabled = false;
+        el.categoryBrowse.disabled = false;
 
         // QR / URL visible when server is running (both SERVER_ON and SERVICE_ACTIVE)
         el.qrBox.style.display = isRunning ? '' : 'none';
@@ -610,13 +605,6 @@
                 el.qrImage.style.display = 'block';
             }
         }
-
-        // Re-enable buttons appropriately
-        el.startServerBtn.disabled = !isOff;
-        el.activateServiceBtn.disabled = !isServerOn;
-        el.stopServerBtn.disabled = !isServerOn;
-        el.deactivateServiceBtn.disabled = !isActive;
-        el.stopServiceBtn.disabled = !isActive;
 
         // Reset on stop
         if (isOff) {

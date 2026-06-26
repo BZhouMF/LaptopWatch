@@ -103,42 +103,27 @@
                     </section>
                 </div>
 
-                <!-- 服务控制 — 三态按钮 -->
+                <!-- 服务控制 — 扁平按钮，灰显代替隐藏 -->
                 <section class="card card-service">
                     <div class="service-layout">
-                        <!-- OFF: 启动服务器 -->
-                        <div class="btn-col" id="btnColOff">
+                        <div class="btn-row" style="gap:10px;flex-wrap:wrap">
                             <button class="btn btn-start" id="startServerBtn">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                 <span>启动服务器</span>
                             </button>
-                        </div>
-                        <!-- SERVER_ON: 启动服务 + 停止服务器 + 更新配置 -->
-                        <div class="btn-col" id="btnColServerOn" style="display:none">
-                            <button class="btn btn-start" id="activateServiceBtn">
+                            <button class="btn btn-start" id="activateServiceBtn" disabled>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                 <span>启动服务</span>
                             </button>
-                            <button class="btn btn-stop" id="stopServerBtn">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                                <span>停止服务器</span>
-                            </button>
-                            <button class="btn btn-outline" id="applyConfigServerOnBtn">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
-                                <span>更新配置</span>
-                            </button>
-                        </div>
-                        <!-- SERVICE_ACTIVE: 停用服务 + 停止服务器 + 更新配置 -->
-                        <div class="btn-col" id="btnColActive" style="display:none">
-                            <button class="btn btn-stop" id="deactivateServiceBtn">
+                            <button class="btn btn-stop" id="deactivateServiceBtn" style="display:none" disabled>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
                                 <span>停用服务</span>
                             </button>
-                            <button class="btn btn-stop" id="stopServiceBtn">
+                            <button class="btn btn-stop" id="stopBtn" style="display:none">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                                <span>停止服务器</span>
+                                <span id="stopBtnLabel">停止服务器</span>
                             </button>
-                            <button class="btn btn-outline" id="applyConfigActiveBtn">
+                            <button class="btn btn-outline" id="applyConfigBtn" disabled>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
                                 <span>更新配置</span>
                             </button>
