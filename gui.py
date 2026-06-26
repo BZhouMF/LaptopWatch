@@ -22,7 +22,6 @@ import queue
 import urllib.request
 import urllib.error
 from pathlib import Path
-
 import webview
 
 from config import config

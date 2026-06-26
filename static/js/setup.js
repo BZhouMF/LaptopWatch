@@ -560,25 +560,12 @@
             el.statusText.textContent = '运行中（' + currentMode + '模式）';
         }
 
-        // ── 按钮可见性 / 禁用 ──
-        // 启动服务器：只在 off 时可见
-        el.startServerBtn.style.display = isOff ? '' : 'none';
-
-        // 激活服务：始终可见，server_on 时可点
-        el.activateServiceBtn.style.display = '';
+        // ── 按钮始终可见，纯用 disabled 切换，布局不动 ──
+        el.startServerBtn.disabled = isRunning;
         el.activateServiceBtn.disabled = !isServerOn;
-
-        // 停用服务：active 时可见
-        el.deactivateServiceBtn.style.display = isActive ? '' : 'none';
         el.deactivateServiceBtn.disabled = !isActive;
-
-        // 停止按钮：running 时可见；active 时标签为"停止服务器"，server_on 时也是"停止服务器"
-        el.stopBtn.style.display = isRunning ? '' : 'none';
-        el.stopBtn.disabled = false;
+        el.stopBtn.disabled = !isRunning;
         el.stopBtnLabel.textContent = isActive ? '停止服务' : '停止服务器';
-
-        // 更新配置：始终可见，running 时可点
-        el.applyConfigBtn.style.display = '';
         el.applyConfigBtn.disabled = !isRunning;
 
         // Controls: mode / mediaDir / sort 运行时可改
