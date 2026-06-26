@@ -558,7 +558,7 @@
 
         // ── 按钮始终可见，纯用 disabled/样式切换，布局不动 ──
         // powerBtn：off → "启动服务器"（绿色），running → "停止"（红色）
-        el.powerBtnLabel.textContent = isOff ? '启动服务器' : '停止';
+        el.powerBtnLabel.textContent = isOff ? '启动服务器' : '停止服务器';
         el.powerBtn.className = isOff ? 'btn btn-start' : 'btn btn-stop';
         el.powerBtn.disabled = false;
 
