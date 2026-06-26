@@ -239,6 +239,9 @@ class TestDesktopApi:
         tg._log_index = 0
         tg._qid_process = None
         tg._service_port = 5002
+        tg._stop_debounce = 0
+        tg._service_was_active = False
+        tg._external_synced = False
         tg._session_logs.clear()
         tg._session_logs_saved = False
 

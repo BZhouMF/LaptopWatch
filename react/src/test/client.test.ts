@@ -39,6 +39,14 @@ describe("api_client", () => {
   });
 
   it("redirects to /login on 401 outside /login page", async () => {
+    // jsdom doesn't implement navigation, mock window.location before the interceptor runs
+    const location_mock = { href: "", pathname: "/" };
+    Object.defineProperty(window, "location", {
+      value: location_mock,
+      writable: true,
+      configurable: true,
+    });
+
     const interceptor_use = vi.fn();
     mock_axios.create.mockReturnValue({
       interceptors: { response: { use: interceptor_use } },
@@ -54,12 +62,8 @@ describe("api_client", () => {
       response: { status: 401 },
     };
 
-    // The handler returns Promise.reject — catch it to avoid unhandled rejection
-    const result = error_handler(fake_error);
-    if (result && typeof result.catch === "function") {
-      result.catch(() => {});
-    }
+    error_handler(fake_error)?.catch(() => {});
 
-    expect(interceptor_use).toHaveBeenCalled();
+    expect(location_mock.href).toBe("/login?redirect=%2F");
   });
 });

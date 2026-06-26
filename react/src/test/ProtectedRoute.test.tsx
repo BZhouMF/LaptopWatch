@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
 import ProtectedRoute from "../components/ProtectedRoute";
 
@@ -38,14 +39,12 @@ describe("ProtectedRoute", () => {
       new Error("unauthorized")
     );
     const { container } = render_protected_route();
-    // After auth check fails, ProtectedRoute renders Navigate which shows nothing
-    // Just verify no spinner remains
-    await vi.waitFor(
-      () => {
-        expect(container.querySelector(".animate-spin")).toBeNull();
-      },
-      { timeout: 2000 }
-    );
+    // After auth check fails, ProtectedRoute renders Navigate — spinner disappears
+    await waitFor(() => {
+      expect(container.querySelector(".animate-spin")).toBeNull();
+    });
+    // Flush any pending state updates from Navigate to avoid act() warnings
+    await act(() => Promise.resolve());
   });
 
   it("renders Outlet when authenticated", async () => {
@@ -53,19 +52,17 @@ describe("ProtectedRoute", () => {
       data: { exists: true },
     });
 
-    // Need to test with a real Outlet child
-    const { container } = render(
-      <MemoryRouter>
-        <ProtectedRoute />
-      </MemoryRouter>
-    );
+    await act(async () => {
+      render(
+        <MemoryRouter>
+          <ProtectedRoute />
+        </MemoryRouter>
+      );
+    });
 
-    // Wait for the check to complete
-    await vi.waitFor(
-      () => {
-        expect(container.querySelector(".animate-spin")).toBeNull();
-      },
-      { timeout: 2000 }
-    );
+    // After auth succeeds, spinner should be gone
+    await waitFor(() => {
+      expect(screen.queryByRole("status")).toBeNull();
+    });
   });
 });

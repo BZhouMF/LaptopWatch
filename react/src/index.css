@@ -3,6 +3,11 @@
 /* ═══════════════════════════════════════════════════
    Bilibili-style Design System
    Core: #FB7299 (B站粉) on light backgrounds
+   Reference: B站 CSS variables extracted from live site
+     --brand_pink: #FB7299
+     --brand_pink_hover: #FF8CB0
+     --brand_pink_active: #E84B85
+     --brand_pink_thin: #FFECF1
    ═══════════════════════════════════════════════════ */
 
 @theme {
@@ -10,11 +15,11 @@
   --color-bg-primary: #f4f5f7;
   --color-bg-secondary: #ffffff;
   --color-bg-card: #ffffff;
-  --color-bg-card-hover: #f0f1f4;
+  --color-bg-card-hover: #f1f2f3;
   --color-bg-elevated: #ffffff;
 
   /* ── Border ─────────────────────────────────── */
-  --color-border-primary: #e3e5e8;
+  --color-border-primary: #e3e5e7;
   --color-border-secondary: #eaecef;
 
   /* ── Text ───────────────────────────────────── */
@@ -24,7 +29,8 @@
 
   /* ── Brand / Accent ─────────────────────────── */
   --color-accent: #fb7299;
-  --color-accent-hover: #fc8bab;
+  --color-accent-hover: #ff8cb0;
+  --color-accent-active: #e84b85;
   --color-accent-subtle: #fb729912;
   --color-accent-border: #fb729930;
   --color-accent-light: #fff0f4;
@@ -68,12 +74,81 @@ body {
 .card {
   background: #fff;
   border-radius: 8px;
-  border: 1px solid #e3e5e8;
+  border: 1px solid #e3e5e7;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   transition: box-shadow 0.2s, transform 0.2s;
 }
 .card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.card:active {
+  transform: scale(0.99);
+}
+
+/* ── Bilibili-style nav bar ───────────────────────── */
+.nav-header {
+  height: 64px;
+  background: #fff;
+  border-bottom: 1px solid #e3e5e7;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+/* ── Bilibili-style badge/tag ─────────────────────── */
+.badge-pink {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #fb7299;
+  background: #fff0f4;
+  border: 1px solid rgba(251, 114, 153, 0.2);
+  border-radius: 4px;
+}
+
+/* ── Bilibili-style focus ring ────────────────────── */
+.input-focus-pink:focus {
+  border-color: #fb7299 !important;
+  box-shadow: 0 0 0 3px rgba(251, 114, 153, 0.12) !important;
+}
+
+/* ── Bilibili-style selection ─────────────────────── */
+::selection {
+  background: rgba(251, 114, 153, 0.2);
+  color: #18191c;
+}
+
+/* ── Button base with B站 micro-interactions ──────── */
+.btn-bilibili {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.btn-bilibili:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn-bilibili:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-bilibili-primary {
+  background: #fb7299;
+  color: #fff;
+}
+.btn-bilibili-primary:hover:not(:disabled) {
+  background: #ff8cb0;
+  box-shadow: 0 2px 8px rgba(251, 114, 153, 0.25);
 }
 
 /* ── Animations ────────────────────────────────────── */
@@ -98,7 +173,7 @@ body {
   100% { background-position: 200% 0; }
 }
 .skeleton {
-  background: linear-gradient(90deg, #f0f1f4 25%, #e8e9ec 50%, #f0f1f4 75%);
+  background: linear-gradient(90deg, #f1f2f3 25%, #e8e9ec 50%, #f1f2f3 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }

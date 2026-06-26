@@ -6,6 +6,7 @@ import os
 import re
 import time
 import socket
+import threading
 import urllib.parse
 from flask import Blueprint, request, jsonify, send_from_directory, session, Response
 from config import config
@@ -27,12 +28,13 @@ import werkzeug.wsgi
 werkzeug.wsgi.FileWrapper = _BigFileWrapper
 
 # ── 视频流传输参数 ──
-VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 0.5 * 1024 * 1024))  # 512KB
-SEND_TIMEOUT = 5  # socket 发送超时秒数，超时即客户端停止接收
+VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 2 * 1024 * 1024))  # 2MB，4K 视频需要大块传输
+SEND_TIMEOUT = 30  # socket 发送超时秒数，移动端 WiFi 波动较大需要更长容忍
 
 
 # 随机模式 ID 缓存：{ (seed, media_type): (shuffled_ids, count) }
 _random_id_cache = {}
+_random_id_cache_lock = threading.Lock()
 
 
 def _media_type(run_mode=None):
@@ -66,8 +68,10 @@ def _db_load_more(offset, limit, is_random):
             seed = session[seed_key]
 
             cache_key = (seed, media_type)
-            if cache_key in _random_id_cache:
-                all_ids, total = _random_id_cache[cache_key]
+            with _random_id_cache_lock:
+                cached = _random_id_cache.get(cache_key)
+            if cached is not None:
+                all_ids, total = cached
             else:
                 media_prefix = _os.path.abspath(str(config.MEDIA_DIR)).rstrip(_os.sep) + _os.sep
                 all_ids = [
@@ -80,7 +84,8 @@ def _db_load_more(offset, limit, is_random):
                 rng = _random.Random(seed)
                 rng.shuffle(all_ids)
                 total = len(all_ids)
-                _random_id_cache[cache_key] = (all_ids, total)
+                with _random_id_cache_lock:
+                    _random_id_cache[cache_key] = (all_ids, total)
             page_ids = all_ids[offset:offset + limit]
 
             if page_ids:

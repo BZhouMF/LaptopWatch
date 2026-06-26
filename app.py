@@ -60,6 +60,37 @@ app.register_blueprint(file_bp)
 app.register_blueprint(douyin_bp)
 app.register_blueprint(category_bp)
 
+# ==================== 服务激活门控 ====================
+# 服务未激活时，拦截所有非白名单请求（含页面路由）
+_SERVICE_GATE_WHITELIST = frozenset({
+    '/api/admin/config',
+    '/api/config-version',
+    '/api/mode',
+    '/api/drives',
+})
+
+
+@app.before_request
+def gate_service_active():
+    """若 SERVICE_ACTIVE=False，拦截所有非白名单请求返回 503"""
+    from flask import request as _req
+
+    path = _req.path
+
+    # 白名单路径始终放行
+    if path.rstrip('/') in _SERVICE_GATE_WHITELIST or path.startswith('/api/check_path'):
+        return None
+
+    if not config.SERVICE_ACTIVE:
+        return jsonify({
+            'code': 1,
+            'msg': '服务未激活',
+            'service_active': False,
+        }), 503
+
+    return None
+
+
 # ==================== 请求日志中间件 ====================
 # 不需要记录到 stdout 的请求路径前缀
 _SILENT_PREFIXES = ('/static/', '/favicon.ico', '/media/thumbnail/', '/media/navigate', '/media/serve_media/')
@@ -74,7 +105,7 @@ def log_incoming_request():
         return
     if request.path.startswith(_SILENT_PREFIXES):
         return
-    _safe_print(f"[REQUEST] {request.remote_addr} -> {request.method} {request.path}", flush=True)
+    _safe_print(f"[REQUEST] {request.remote_addr} -> {request.method} {request.path}")
 
 # 注入前端路由常量到所有模板
 from routes_config import FRONTEND_ROUTES

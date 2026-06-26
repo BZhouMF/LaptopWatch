@@ -240,17 +240,13 @@ export default function MediaPlayerPage(): JSX.Element {
       clearTimeout(transition_timer_ref.current);
       transition_timer_ref.current = null;
     }
-    // Clear CSS transitions and transforms
+    // Pause the outgoing video — do NOT touch CSS styles imperatively.
+    // React cleans up transforms/transitions when slide_anim is set to null
+    // and active_buffer is swapped. Imperative clearing causes both videos
+    // to snap to visible position for one frame → "two videos" flash.
     const old_active = get_active_video();
-    const old_inactive = get_inactive_video();
-    if (old_inactive) {
-      old_inactive.style.transition = "";
-      old_inactive.style.transform = "";
-    }
     if (old_active) {
       old_active.pause();
-      old_active.style.transition = "";
-      old_active.style.transform = "";
     }
     // Swap buffers: the inactive video becomes active
     const new_active_buffer = active_buffer_ref.current === "A" ? "B" : "A";
@@ -557,13 +553,8 @@ export default function MediaPlayerPage(): JSX.Element {
     if (next_idx < cur_history.length) {
       preload_index_ref.current = next_idx;
       const url = `/media/serve_media/${encodeURIComponent(cur_history[next_idx].relative_path)}`;
-      const inactive = get_inactive_video();
-      if (inactive) {
-        inactive.muted = is_muted;
-        inactive.playbackRate = selected_speed;
-        inactive.src = url;
-      }
-      // Sync React state for rendering
+      // Set via React state only — avoids one-frame flash where inactive video
+      // has src but no translateY(100%) transform yet (visible on slower browsers)
       if (active_buffer_ref.current === "A") set_video_b_src(url);
       else set_video_a_src(url);
       return;
@@ -586,13 +577,7 @@ export default function MediaPlayerPage(): JSX.Element {
           return next;
         });
         const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
-        const inactive = get_inactive_video();
-        if (inactive) {
-          inactive.muted = is_muted;
-          inactive.playbackRate = selected_speed;
-          inactive.src = url;
-        }
-        // Sync React state for rendering
+        // Set via React state only — same reason as above
         if (active_buffer_ref.current === "A") set_video_b_src(url);
         else set_video_a_src(url);
       }
@@ -677,8 +662,6 @@ export default function MediaPlayerPage(): JSX.Element {
     }
     show_controls();
   }, []);
-
-  useEffect(() => { if (!is_grid) preload_next(); }, [history_index, play_history.length]);
 
   // Sync refs for functions referenced in event handlers (avoids stale closures)
   useEffect(() => { handle_nav_next_ref.current = handle_nav_next; }, [handle_nav_next]);
@@ -831,7 +814,7 @@ export default function MediaPlayerPage(): JSX.Element {
       src={src}
       muted={is_muted}
       playsInline
-      preload="auto"
+      preload={is_grid ? "metadata" : "auto"}
       className="absolute inset-0 w-full h-full object-contain bg-black"
       style={{ zIndex: z_index, transform, transition }}
     />
@@ -881,7 +864,7 @@ export default function MediaPlayerPage(): JSX.Element {
   return (
     <div
       ref={container_ref}
-      className="relative h-screen w-screen overflow-hidden bg-black select-none touch-none"
+      className="relative h-dvh w-screen overflow-hidden bg-black select-none touch-none"
       onTouchStart={gesture.handle_touch_start}
       onTouchMove={gesture.handle_touch_move}
       onTouchEnd={gesture.handle_touch_end}
@@ -989,7 +972,7 @@ export default function MediaPlayerPage(): JSX.Element {
 
       {/* ─── Bottom Controls ────────────────────────── */}
       {controls_visible && show_video && (
-        <div className="player-controls-area absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/80 to-transparent px-4 pb-4 pt-10">
+        <div className="player-controls-area absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-10">
           {/* Progress bar */}
           <div
             ref={progress_ref}

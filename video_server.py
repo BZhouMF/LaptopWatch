@@ -17,7 +17,7 @@ video_app = FastAPI()
 
 MEDIA_DIR = config.MEDIA_DIR.resolve() if config.MEDIA_DIR else None
 
-VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 0.5 * 1024 * 1024))  # 256KB
+VIDEO_CHUNK = int(os.getenv('LAPTOPWATCH_VIDEO_CHUNK', 2 * 1024 * 1024))  # 2MB
 
 # —— Flask session cookie 验证 ——
 _session_serializer = URLSafeTimedSerializer(

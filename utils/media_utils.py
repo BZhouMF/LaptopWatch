@@ -3,6 +3,7 @@
 """
 import os
 import time
+import threading
 from pathlib import Path
 from datetime import datetime
 from config import config
@@ -104,14 +105,16 @@ def _format_db_row(r):
 # ==================== 目录浏览模式工具函数 ====================
 
 _would_redirect_cache: dict[str, bool] = {}
+_cache_lock = threading.Lock()
 
 
 def invalidate_cache(clear_key: str | None = None):
     """清除重定向缓存，clear_key 为 None 时全清空"""
-    if clear_key is None:
-        _would_redirect_cache.clear()
-    else:
-        _would_redirect_cache.pop(str(clear_key), None)
+    with _cache_lock:
+        if clear_key is None:
+            _would_redirect_cache.clear()
+        else:
+            _would_redirect_cache.pop(str(clear_key), None)
 
 
 def _collect_files_recursive(folder_path, limit, run_mode, conn=None):
@@ -244,7 +247,7 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
             sub_subfolders = _get_sorted_subfolders(sub_path, conn=shared_conn)
             sub_is_leaf = len(sub_subfolders) == 0
 
-            # 收集文件（先同步再查询，确保 DB 中有该子文件夹的数据）
+            # 收集文件：先同步再查询，确保 DB 中有该子文件夹的数据
             if already_synced is None or sub_path not in already_synced:
                 sync_folder(shared_conn, sub_path)
                 if already_synced is not None:
@@ -275,11 +278,12 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
         result['single_leaf_override'] = result['categories'][0]['is_leaf']
 
     # 缓存重定向判断结果，避免 from_override 链重复计算
-    _would_redirect_cache[str(folder_path.resolve())] = (
-        result['is_leaf']
-        or result['total_categories'] == 0
-        or (result['single_leaf_override'] and result['total_categories'] == 1)
-    )
+    with _cache_lock:
+        _would_redirect_cache[str(folder_path.resolve())] = (
+            result['is_leaf']
+            or result['total_categories'] == 0
+            or (result['single_leaf_override'] and result['total_categories'] == 1)
+        )
 
     return result
 
@@ -292,7 +296,8 @@ def check_browse_would_redirect(folder_path, already_synced=None):
     优先从缓存读取，避免 from_override 链重复计算。
     """
     cache_key = str(Path(folder_path).resolve())
-    cached = _would_redirect_cache.get(cache_key)
+    with _cache_lock:
+        cached = _would_redirect_cache.get(cache_key)
     if cached is not None:
         return cached
 
@@ -303,4 +308,5 @@ def check_browse_would_redirect(folder_path, already_synced=None):
     )
 
     # _would_redirect_cache 已在 get_category_children_info 中写入
-    return _would_redirect_cache.get(cache_key, False)
+    with _cache_lock:
+        return _would_redirect_cache.get(cache_key, False)

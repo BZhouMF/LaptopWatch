@@ -3,12 +3,15 @@
 管理文件夹缓存、文件缓存、缩略图缓存等
 """
 import time
+import threading
 from typing import Dict, Any, List, Tuple, Optional
 
 class CacheManager:
     """缓存管理器"""
 
     def __init__(self):
+        self._lock = threading.Lock()
+
         # 文件夹缓存
         self._folders_cache = {
             'timestamp': 0,
@@ -29,12 +32,21 @@ class CacheManager:
         # 缓存持续时间（秒）
         self.CACHE_DURATION = 60
 
+    def check_and_set_preview_cache(self, cache_key):
+        """线程安全地检查并设置预览缓存，返回 True 表示已存在（跳过）"""
+        with self._lock:
+            if cache_key in self.preview_cache:
+                return True
+            self.preview_cache[cache_key] = time.time()
+            return False
+
     def clean_preview_cache(self, expire_time: int = 3600):
         """清理过期的预览缓存"""
-        now = time.time()
-        to_remove = [k for k, v in self.preview_cache.items() if now - v > expire_time]
-        for k in to_remove:
-            del self.preview_cache[k]
+        with self._lock:
+            now = time.time()
+            to_remove = [k for k, v in self.preview_cache.items() if now - v > expire_time]
+            for k in to_remove:
+                del self.preview_cache[k]
 
     def get_folders_cache(self, sort_type: str, sort_order: str) -> Optional[List[Dict[str, Any]]]:
         """获取文件夹缓存"""

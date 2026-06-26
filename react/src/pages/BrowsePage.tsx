@@ -374,7 +374,7 @@ export default function BrowsePage() {
       : "";
 
   return (
-    <div className="flex h-[calc(100vh-0px)] flex-col bg-bg-primary">
+    <div className="flex h-dvh flex-col bg-bg-primary">
       {/* Header */}
       <header className="flex items-center justify-between border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-2">
         <div className="flex items-center gap-2 min-w-0">

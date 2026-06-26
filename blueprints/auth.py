@@ -55,10 +55,9 @@ def _get_stored_password():
         os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
         conn = sqlite3.connect(config.DB_PATH)
         conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA journal_mode=DELETE")
+        conn.execute("PRAGMA journal_mode=WAL")
         from utils.db_utils import init_tables
         init_tables(conn)
-        conn.execute("PRAGMA journal_mode=WAL")
         row = conn.execute(
             "SELECT password_hash, salt FROM users WHERE id=1"
         ).fetchone()
@@ -92,6 +91,7 @@ def login():
             return jsonify({'code': 1, 'msg': '密码错误'}), 401
 
         session['logged_in'] = True
+        session.permanent = True
         log_access(request, 'LOGIN', '', f'账号 {account} 登录成功')
         return jsonify({'code': 0, 'msg': '登录成功'})
     except Exception as e:

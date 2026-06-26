@@ -1,0 +1,7 @@
+/* dvh fallback for browsers that don't support dvh (Chrome 108+, e.g. Baidu Browser).
+   Separate from index.css to avoid Tailwind's :not(#\#) specificity wrapping. */
+@supports not (height: 1dvh) {
+  .h-dvh {
+    height: 100vh !important;
+  }
+}

@@ -3,9 +3,17 @@
 集中管理所有配置常量、环境变量和路径设置
 """
 import os
+import threading
 from pathlib import Path
 
 class Config:
+    # 保护运行时可变配置的线程锁（run_mode / random_mode 等被多线程并发读写）
+    _runtime_lock = threading.Lock()
+
+    # ── 服务激活状态 & 配置版本 ──
+    SERVICE_ACTIVE = os.getenv('LAPTOPWATCH_SERVICE_ACTIVE', 'false').lower() == 'true'
+    CONFIG_VERSION = 0
+
     """应用配置类"""
 
     # ==================== 基础配置 ====================
@@ -21,6 +29,10 @@ class Config:
     IsDebug = False
     # IsDebug = True   # 开启会导致 reloader 父子进程残留，端口无法释放
 
+    # 全屏策略：true=浏览器原生播放器(兼容最好,无自定义手势UI)
+    #         false=自定义UI全屏(保留手势/倍速/亮度等,默认)
+    NATIVE_FULLSCREEN = True
+
     # ==================== 排序配置 ====================
     SORT_TYPE = os.getenv('LAPTOPWATCH_SORT_TYPE', 'name')
     SORT_ORDER = os.getenv('LAPTOPWATCH_SORT_ORDER', 'asc')
@@ -35,12 +47,60 @@ class Config:
     # 是否默认静音（true=默认静音, false=默认有声音）
     DOUYIN_MUTED = False
     # 是否启用随机媒体（false=按排序顺序播放）
-    DOUYIN_RANDOM_MEDIA = True
+    DOUYIN_RANDOM_MEDIA = os.getenv('LAPTOPWATCH_DOUYIN_RANDOM_MEDIA', 'true').lower() == 'true'
     # 历史记录/反重复表最大保留条数
     DOUYIN_HISTORY_MAX = 200
-    # 全屏策略：true=浏览器原生播放器(兼容最好,无自定义手势UI)
-    #         false=自定义UI全屏(保留手势/倍速/亮度等,默认)
-    NATIVE_FULLSCREEN = True
+
+    @classmethod
+    def update_runtime(cls, mode=None, category_browse=None,
+                       random_mode=None, douyin_random_media=None,
+                       service_active=None, media_dir=None):
+        """线程安全地更新运行时配置，返回 (ok: bool, result: dict)"""
+        with cls._runtime_lock:
+            changed = False
+            # 先处理 media_dir：mode 切换校验依赖它
+            if media_dir is not None:
+                if media_dir == '':
+                    config.MEDIA_DIR = None
+                else:
+                    config.MEDIA_DIR = Path(media_dir).resolve()
+                changed = True
+            if mode is not None:
+                if mode in ('video', 'image', 'douyin') and not config.MEDIA_DIR:
+                    return False, {'code': 1, 'msg': f'无法切换到 {mode} 模式：未设置媒体目录'}
+                if config.RUN_MODE != mode:
+                    config.RUN_MODE = mode
+                    changed = True
+            if category_browse is not None:
+                val = bool(category_browse)
+                if config.CATEGORY_BROWSE != val:
+                    config.CATEGORY_BROWSE = val
+                    changed = True
+            if random_mode is not None:
+                val = bool(random_mode)
+                if config.RANDOM_MODE != val:
+                    config.RANDOM_MODE = val
+                    changed = True
+            if douyin_random_media is not None:
+                val = bool(douyin_random_media)
+                if config.DOUYIN_RANDOM_MEDIA != val:
+                    config.DOUYIN_RANDOM_MEDIA = val
+                    changed = True
+            if service_active is not None:
+                val = bool(service_active)
+                if config.SERVICE_ACTIVE != val:
+                    config.SERVICE_ACTIVE = val
+                    changed = True
+            if changed:
+                config.CONFIG_VERSION += 1
+            return True, {
+                'run_mode': config.RUN_MODE,
+                'category_browse': config.CATEGORY_BROWSE,
+                'random_mode': config.RANDOM_MODE,
+                'douyin_random_media': config.DOUYIN_RANDOM_MEDIA,
+                'service_active': config.SERVICE_ACTIVE,
+                'config_version': config.CONFIG_VERSION,
+            }
 
     # ==================== 日志配置 ====================
     LOG_LEVEL = os.getenv('LAPTOPWATCH_LOG_LEVEL', 'INFO').upper()

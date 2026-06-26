@@ -113,6 +113,18 @@ def _generate_qr_base64(url):
         return ''
 
 
+def _post_json(req, timeout=5):
+    """POST 请求并解析 JSON 响应，正确处理 HTTPError 中的错误信息"""
+    try:
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        return json.loads(resp.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode('utf-8'))
+            return body
+        except Exception:
+            return {'code': 1, 'msg': f'HTTP {exc.code}: {exc.reason}'}
+
 # ── 安全静态文件 Handler ──
 def _make_safe_handler(root_dir):
     """返回一个仅允许 /templates/ 和 /static/ 路径的 HTTP handler"""
@@ -264,6 +276,7 @@ class _DesktopApi:
         # 构建环境变量
         env = os.environ.copy()
         env['LAPTOPWATCH_MODE'] = mode
+        env['LAPTOPWATCH_SERVICE_ACTIVE'] = 'false'
         env['LAPTOPWATCH_PORT'] = str(port)
         if media_dir:
             env['LAPTOPWATCH_MEDIA_DIR'] = media_dir
@@ -271,8 +284,7 @@ class _DesktopApi:
         env['LAPTOPWATCH_SORT_ORDER'] = settings.get('sort_order', 'asc')
         env['LAPTOPWATCH_RANDOM'] = 'true' if settings.get('random', False) else 'false'
         env['LAPTOPWATCH_CATEGORY_BROWSE'] = 'true' if settings.get('category_browse', False) else 'false'
-        if mode == 'douyin':
-            env['LAPTOPWATCH_DOUYIN_RANDOM_MEDIA'] = 'true' if settings.get('douyin_random', False) else 'false'
+        env['LAPTOPWATCH_DOUYIN_RANDOM_MEDIA'] = 'true' if settings.get('douyin_random', False) else 'false'
         env['LAPTOPWATCH_GUI_LAUNCH'] = '1'
 
         # 启动子进程
@@ -373,14 +385,102 @@ class _DesktopApi:
         local_url = f'http://127.0.0.1:{port}'
         qr_base64 = _generate_qr_base64(lan_url or local_url)
 
-        _log(f'[INFO] 服务已启动 — LAN: {lan_url}  Local: {local_url}')
+        _log(f'[INFO] 服务器已启动（未激活）— LAN: {lan_url}  Local: {local_url}')
         return {
             'code': 0,
-            'msg': '服务已启动',
+            'msg': '服务器已启动（未激活）',
             'local_url': local_url,
             'lan_url': lan_url,
             'qr_base64': qr_base64,
         }
+
+    def activate_service(self, settings=None):
+        """激活服务并应用当前运行时配置
+        settings: dict 可选，包含 mode / random_mode / douyin_random_media / category_browse
+        """
+        body = {'service_active': True}
+        if settings:
+            if 'mode' in settings:
+                body['mode'] = settings['mode']
+            if 'media_dir' in settings:
+                body['media_dir'] = settings.get('media_dir', '')
+            if 'random_mode' in settings:
+                body['random_mode'] = settings.get('random_mode', False)
+            if 'douyin_random_media' in settings:
+                body['douyin_random_media'] = settings.get('douyin_random_media', False)
+            if 'category_browse' in settings:
+                body['category_browse'] = settings.get('category_browse', False)
+        try:
+            data = json.dumps(body).encode('utf-8')
+            req = urllib.request.Request(
+                f'http://127.0.0.1:{_service_port}/api/admin/config',
+                data=data,
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-Auth-Password': config.DEFAULT_PASSWORD,
+                },
+                method='POST'
+            )
+            result = _post_json(req)
+
+            if result.get('code') == 0:
+                lan_ip = get_local_ip()
+                lan_url = f'http://{lan_ip}:{_service_port}' if lan_ip else ''
+                local_url = f'http://127.0.0.1:{_service_port}'
+                qr_base64 = _generate_qr_base64(lan_url or local_url)
+                _log(f'[INFO] 服务已激活 — LAN: {lan_url}  Local: {local_url}')
+                return {
+                    'code': 0,
+                    'msg': '服务已激活',
+                    'local_url': local_url,
+                    'lan_url': lan_url,
+                    'qr_base64': qr_base64,
+                    'config_version': result.get('config', {}).get('config_version', 0),
+                }
+            _log(f'[ERROR] 服务激活失败: {result.get("msg", "未知错误")}')
+            return result
+        except Exception as exc:
+            _log(f'[ERROR] 服务激活失败: {exc}')
+            return {'code': 1, 'msg': f'服务激活失败: {exc}'}
+
+    def check_service_active(self):
+        """检查 Flask 服务是否已激活"""
+        try:
+            req = urllib.request.Request(
+                f'http://127.0.0.1:{_service_port}/api/config-version',
+                headers={'X-Auth-Password': config.DEFAULT_PASSWORD},
+            )
+            resp = urllib.request.urlopen(req, timeout=2)
+            data = json.loads(resp.read().decode('utf-8'))
+            return {
+                'service_active': data.get('service_active', False),
+                'version': data.get('version', 0),
+            }
+        except Exception:
+            return {'service_active': False, 'version': 0}
+
+    def deactivate_service(self):
+        """停用服务但不停止服务器进程 — 设置 service_active=false"""
+        try:
+            data = json.dumps({'service_active': False}).encode('utf-8')
+            req = urllib.request.Request(
+                f'http://127.0.0.1:{_service_port}/api/admin/config',
+                data=data,
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-Auth-Password': config.DEFAULT_PASSWORD,
+                },
+                method='POST'
+            )
+            result = _post_json(req)
+            if result.get('code') == 0:
+                _log('[INFO] 服务已停用（服务器仍在运行）')
+                return {'code': 0, 'msg': '服务已停用', 'config_version': result.get('config', {}).get('config_version', 0)}
+            _log(f'[ERROR] 服务停用失败: {result.get("msg", "未知错误")}')
+            return result
+        except Exception as exc:
+            _log(f'[ERROR] 服务停用失败: {exc}')
+            return {'code': 1, 'msg': f'服务停用失败: {exc}'}
 
     def stop_service(self):
         """停止 Flask 子进程"""
@@ -532,6 +632,43 @@ class _DesktopApi:
             new_logs = _flask_logs[_log_index:]
             _log_index = len(_flask_logs)
         return {'logs': new_logs}
+
+    def add_log(self, msg):
+        """前端 JS 通过此方法将日志写入会话日志文件"""
+        _log(msg)
+
+    def get_runtime_config(self):
+        """获取 Flask 服务当前运行时配置"""
+        try:
+            req = urllib.request.Request(
+                f'http://127.0.0.1:{_service_port}/api/mode',
+                headers={'X-Auth-Password': config.DEFAULT_PASSWORD},
+            )
+            resp = urllib.request.urlopen(req, timeout=3)
+            return json.loads(resp.read().decode('utf-8'))
+        except Exception as exc:
+            return {'code': 1, 'msg': f'获取配置失败: {exc}'}
+
+    def update_runtime_config(self, settings):
+        """运行时更新 Flask 服务配置"""
+        try:
+            data = json.dumps(settings).encode('utf-8')
+            req = urllib.request.Request(
+                f'http://127.0.0.1:{_service_port}/api/admin/config',
+                data=data,
+                headers={
+                    'Content-Type': 'application/json',
+                    'X-Auth-Password': config.DEFAULT_PASSWORD,
+                },
+                method='POST'
+            )
+            result = _post_json(req)
+            if result.get('code') != 0:
+                _log(f'[ERROR] 配置更新失败: {result.get("msg", "未知错误")}')
+            return result
+        except Exception as exc:
+            _log(f'[ERROR] 配置更新失败: {exc}')
+            return {'code': 1, 'msg': f'配置更新失败: {exc}'}
 
     def get_qid_status(self):
         """获取管理台运行状态"""

@@ -33,6 +33,9 @@ qid_app.secret_key = config.SECRET_KEY
 qid_app.config['SESSION_COOKIE_NAME'] = 'qid_session'
 qid_app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(hours=config.SESSION_LIFETIME_HOURS)
 
+# 服务端口 — 与 app.py / gui.py 保持一致
+SERVICE_PORT = int(os.getenv('LAPTOPWATCH_PORT', 5002))
+
 # ==================== 全局状态 ====================
 process = None
 process_pid = None
@@ -104,10 +107,10 @@ def api_logout():
 @qid_app.route('/api/status')
 @login_required
 def api_status():
-    # 以端口 5000 为准，而非内部 process 变量，确保与 gui.py 等外部启动方互通
-    pids = check_port(5000)
+    # 以端口检测为准，而非内部 process 变量，确保与 gui.py 等外部启动方互通
+    pids = check_port(SERVICE_PORT)
     running = len(pids) > 0
-    url = f'http://{get_local_ip()}:5000' if running else ''
+    url = f'http://{get_local_ip()}:{SERVICE_PORT}' if running else ''
     return jsonify({
         'code': 0,
         'data': {
@@ -161,7 +164,7 @@ def api_start():
         return jsonify({'code': 1, 'msg': '服务已在运行中'})
 
     # 端口预检：服务可能由 gui.py 等外部启动方运行
-    if check_port(5000):
+    if check_port(SERVICE_PORT):
         return jsonify({'code': 1, 'msg': '服务已在运行中（由外部启动）'})
 
     # 从请求体读取配置（优先），fallback 到全局 mgmt_config
@@ -209,8 +212,7 @@ def api_start():
     env['LAPTOPWATCH_RANDOM'] = 'true' if req_random else 'false'
     env['LAPTOPWATCH_CATEGORY_BROWSE'] = 'true' if req_category_browse else 'false'
     env['LAPTOPWATCH_GUI_LAUNCH'] = '1'
-    if req_mode == 'douyin':
-        env['LAPTOPWATCH_DOUYIN_RANDOM_MEDIA'] = 'true' if req_douyin_random else 'false'
+    env['LAPTOPWATCH_DOUYIN_RANDOM_MEDIA'] = 'true' if req_douyin_random else 'false'
 
     # 启动子进程
     try:
@@ -255,9 +257,9 @@ def api_start():
         return jsonify({'code': 1, 'msg': f'服务启动失败，进程已退出（退出码: {exit_code}），请查看日志'})
 
     # 验证端口是否在监听
-    pids = check_port(5000)
+    pids = check_port(SERVICE_PORT)
     if not pids:
-        add_log('[ERROR] 子进程已启动但端口5000未监听，服务可能启动异常')
+        add_log(f'[ERROR] 子进程已启动但端口{SERVICE_PORT}未监听，服务可能启动异常')
         try:
             process.kill()
         except Exception as e:
@@ -267,10 +269,10 @@ def api_start():
         session_logs = []
         session_start_time = None
         session_id = None
-        return jsonify({'code': 1, 'msg': '服务启动异常，端口5000未被监听，请查看日志'})
+        return jsonify({'code': 1, 'msg': f'服务启动异常，端口{SERVICE_PORT}未被监听，请查看日志'})
 
     ip = get_local_ip()
-    url = f'http://{ip}:5000'
+    url = f'http://{ip}:{SERVICE_PORT}'
     server_url = url
 
     # 把当前配置写回全局状态
@@ -297,7 +299,7 @@ def api_stop():
 
     if process is None:
         # 服务可能由 gui.py 等外部启动方运行，通过端口检测并强杀
-        pids = check_port(5000)
+        pids = check_port(SERVICE_PORT)
         if not pids:
             return jsonify({'code': 1, 'msg': '服务未在运行'})
         add_log(' 服务由外部启动，通过端口终止...')
@@ -314,7 +316,7 @@ def api_stop():
                 )
             except Exception as e:
                 add_log(f' taskkill进程树失败: {e}')
-        force_kill_port(5000, add_log)
+        force_kill_port(SERVICE_PORT, add_log)
         add_log('[STOP] 服务已彻底停止')
         if config.SAVE_SESSION_LOGS:
             save_session_logs(session_logs, session_start_time, session_id, mgmt_config["mode"], mgmt_config["media_dir"], add_log)
@@ -325,7 +327,7 @@ def api_stop():
         return jsonify({'code': 0, 'msg': '服务已停止'})
 
     try:
-        stop_process_gracefully(process, process_pid, 5000, add_log)
+        stop_process_gracefully(process, process_pid, SERVICE_PORT, add_log)
         add_log('[STOP] 服务已彻底停止')
     except Exception as e:
         add_log(f'[ERROR] 终止进程时出错: {e}')
@@ -432,12 +434,12 @@ def _kill_port_service(port, label):
 @qid_app.route('/api/kill-all', methods=['POST'])
 @login_required
 def api_kill_all():
-    """一键终止全部服务：端口5000 + gui.py + 端口5001（自身）"""
+    """一键终止全部服务：主服务端口 + gui.py + 端口5001（自身）"""
     add_log('[KILL-ALL] 收到全终止指令')
 
     def _do_kill():
         time.sleep(0.3)
-        _kill_port_service(5000, '主服务')
+        _kill_port_service(SERVICE_PORT, '主服务')
         time.sleep(0.2)
         _kill_gui()
         time.sleep(0.2)

@@ -8,7 +8,11 @@ const api_client = axios.create({
 api_client.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    // 503 = service not active — let callers handle gracefully, don't trigger 401 redirect
+    if (error.response?.status === 503) {
+      return Promise.reject(error);
+    }
+    if (error.response?.status === 401) {
       const current_path = window.location.pathname;
       if (current_path !== "/login") {
         window.location.href = `/login?redirect=${encodeURIComponent(current_path)}`;

@@ -1,11 +1,33 @@
-import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { useState, useEffect, type FormEvent } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import api_client from "../api/client";
 
 export default function LoginPage() {
   const [account, set_account] = useState("");
   const [password, set_password] = useState("");
+  const [checking_session, set_checking_session] = useState(true);
   const { login, is_loading, error, clear_error } = useAuth();
+  const navigate = useNavigate();
+  const [search_params] = useSearchParams();
+
+  // 已有有效 session 则直接跳转，避免重复弹出登录页
+  useEffect(() => {
+    api_client.get("/api/check_path", { params: { path: "" } })
+      .then(() => {
+        const redirect = search_params.get("redirect") || "/";
+        navigate(redirect, { replace: true });
+      })
+      .catch(() => set_checking_session(false));
+  }, []);
+
+  if (checking_session) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg-primary">
+        <p className="text-sm text-text-muted">检查登录状态...</p>
+      </div>
+    );
+  }
 
   const handle_submit = (event: FormEvent) => {
     event.preventDefault();

@@ -88,7 +88,12 @@ describe("HomePage", () => {
     });
   });
 
-  it("shows loading spinner initially", () => {
+  it("shows loading spinner initially", async () => {
+    const { default: api_client } = await import("../api/client");
+    // Override to never resolve — spinner stays visible, no async state update escapes
+    (api_client.get as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise(() => {})
+    );
     render(
       <MemoryRouter>
         <HomePage />

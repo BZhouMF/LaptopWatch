@@ -2,24 +2,29 @@
 目录浏览模式API蓝图
 提供分类区块展示接口
 """
+import os
 import time
+import threading
 import urllib.parse
-from flask import Blueprint, request, jsonify
+from pathlib import Path
+from flask import Blueprint, request, jsonify, send_file, redirect
 from config import config
 from utils.logging_utils import log_access, log_exception, logger
-from utils.media_utils import get_category_children_info
+from utils.media_utils import get_category_children_info, invalidate_cache
 from blueprints.auth import login_required, require_mode
 
 category_bp = Blueprint('category', __name__, url_prefix='/category')
 
 
 _scanned_folders = set()  # 已同步过的文件夹，点击刷新可清除
+_scanned_folders_lock = threading.Lock()
 
 
 def _sync_db(folder_path, conn=None):
     """同步当前文件夹到 DB，同目录只扫描一次。可传入共享连接避免重复开/关。"""
-    if folder_path in _scanned_folders:
-        return
+    with _scanned_folders_lock:
+        if folder_path in _scanned_folders:
+            return
     try:
         if config.DB_PATH and config.MEDIA_DIR:
             from utils.db_utils import get_db, sync_folder
@@ -29,7 +34,8 @@ def _sync_db(folder_path, conn=None):
             sync_folder(conn, folder_path)
             if _own_conn:
                 conn.close()
-            _scanned_folders.add(folder_path)
+            with _scanned_folders_lock:
+                _scanned_folders.add(folder_path)
     except Exception:
         pass
 
@@ -61,7 +67,7 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
 def category_data():
     """
     JSON API: 获取某路径下的分类结构数据。
-    Query params: path=相对路径（空=根目录）
+    Query params: path=相对路径（空=根目录）, refresh=1 清除缓存
     """
     start_time = time.time()
     try:
@@ -76,6 +82,12 @@ def category_data():
 
         if not full_path or not full_path.exists() or not full_path.is_dir():
             return jsonify({'code': 1, 'msg': '目录不存在'}), 404
+
+        # 手动刷新 → 清除节流阀 + 缓存，强制重新扫描
+        if request.args.get('refresh') == '1':
+            with _scanned_folders_lock:
+                _scanned_folders.discard(str(full_path))
+            invalidate_cache(str(full_path))
 
         # 同步 DB 确保 per-disk 表已更新
         _sync_db(str(full_path))
@@ -129,4 +141,68 @@ def category_grid_more():
         return jsonify({'code': 1, 'msg': str(e)}), 500
     finally:
         log_access(request, 'CATEGORY_GRID_MORE', request.args.get('path', ''),
+                   duration=time.time() - start_time)
+
+
+@category_bp.route('/browse/<path:folder_path>', methods=['GET'])
+@login_required
+@require_mode('video', 'image')
+def category_browse(folder_path):
+    """SSR 入口：处理 refresh 后返回 React SPA"""
+    start_time = time.time()
+    try:
+        decoded_path = urllib.parse.unquote(folder_path)
+        full_path = (config.MEDIA_DIR / decoded_path).resolve()
+
+        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
+            return '非法访问', 403
+
+        # 手动刷新 → 清除节流阀 + 缓存
+        if request.args.get('refresh') == '1':
+            with _scanned_folders_lock:
+                _scanned_folders.discard(str(full_path))
+            invalidate_cache(str(full_path))
+
+        # 返回 React SPA 入口（前端路由会接管 /category/*）
+        react_index = config.REACT_DIST_DIR / 'index.html'
+        if react_index.is_file():
+            return send_file(str(react_index))
+        return 'React 前端未构建', 500
+    except Exception as e:
+        logger.error(f"category_browse 错误: {e}", exc_info=True)
+        return '加载失败', 500
+    finally:
+        log_access(request, 'CATEGORY_BROWSE', folder_path,
+                   duration=time.time() - start_time)
+
+
+@category_bp.route('/grid/<path:folder_path>', methods=['GET'])
+@login_required
+@require_mode('video', 'image')
+def category_grid(folder_path):
+    """SSR 入口：处理 refresh 后返回 React SPA"""
+    start_time = time.time()
+    try:
+        decoded_path = urllib.parse.unquote(folder_path)
+        full_path = (config.MEDIA_DIR / decoded_path).resolve()
+
+        if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
+            return '非法访问', 403
+
+        # 手动刷新 → 清除节流阀 + 缓存
+        if request.args.get('refresh') == '1':
+            with _scanned_folders_lock:
+                _scanned_folders.discard(str(full_path))
+            invalidate_cache(str(full_path))
+
+        # 返回 React SPA 入口（前端路由会接管 /category/*）
+        react_index = config.REACT_DIST_DIR / 'index.html'
+        if react_index.is_file():
+            return send_file(str(react_index))
+        return 'React 前端未构建', 500
+    except Exception as e:
+        logger.error(f"category_grid 错误: {e}", exc_info=True)
+        return '加载失败', 500
+    finally:
+        log_access(request, 'CATEGORY_GRID', folder_path,
                    duration=time.time() - start_time)

@@ -19,9 +19,19 @@
         randomMode: document.getElementById('randomMode'),
         douyinRandom: document.getElementById('douyinRandom'),
         categoryBrowse: document.getElementById('categoryBrowse'),
-        actionBtn: document.getElementById('actionBtn'),
+        startServerBtn: document.getElementById('startServerBtn'),
+        activateServiceBtn: document.getElementById('activateServiceBtn'),
+        stopServerBtn: document.getElementById('stopServerBtn'),
+        deactivateServiceBtn: document.getElementById('deactivateServiceBtn'),
+        stopServiceBtn: document.getElementById('stopServiceBtn'),
+        applyConfigServerOnBtn: document.getElementById('applyConfigServerOnBtn'),
+        applyConfigActiveBtn: document.getElementById('applyConfigActiveBtn'),
+        btnColOff: document.getElementById('btnColOff'),
+        btnColServerOn: document.getElementById('btnColServerOn'),
+        btnColActive: document.getElementById('btnColActive'),
         urlDisplay: document.getElementById('urlDisplay'),
         openBrowserBtn: document.getElementById('openBrowserBtn'),
+        urlGroup: document.getElementById('urlGroup'),
         qrBox: document.getElementById('qrBox'),
         qrPlaceholder: document.getElementById('qrPlaceholder'),
         qrImage: document.getElementById('qrImage'),
@@ -44,10 +54,12 @@
         footerRuntime: document.getElementById('footerRuntime'),
     };
 
-    var running = false;
+    var serverState = 'off';  // 'off' | 'server_on' | 'service_active'
     var sessionStart = null;
     var currentMode = 'normal';
     var footerTimer = null;  // 错误高亮恢复定时器
+    var _pendingLanUrl = '';     // 服务器 URL（启动后暂存）
+    var _pendingQrBase64 = '';  // QR 码（启动后暂存）
 
     // ── 操作类型中文映射 ──
     var ACTION_MAP = {
@@ -143,6 +155,10 @@
 
     // ── 日志输出 ──
     function log(text, cls) {
+        // 同步写入 Python 会话日志文件
+        if (window.pywebview && window.pywebview.api) {
+            try { window.pywebview.api.add_log(text); } catch (e) { /* 静默 */ }
+        }
         var detected = cls || detectLogClass(text);
         var line = document.createElement('div');
         line.className = 'log-line' + (detected ? ' ' + detected : '');
@@ -187,26 +203,19 @@
         var isDouyin = currentMode === 'douyin';
         var isAnyMedia = isMedia || isDouyin;
         var sortIrrelevant = isDouyin && el.douyinRandom.checked;
+        var isRunning = serverState !== 'off';
 
-        var baseState = isAnyMedia;
-        setDisabled(el.mediaDir, !baseState);
-        setDisabled(el.browseBtn, !baseState);
-
-        var sortState = isAnyMedia && !sortIrrelevant;
-        setDisabled(el.sortType, !sortState);
-        setDisabled(el.sortOrder, !sortState);
-        setDisabled(el.randomMode, !sortState);
-
+        // 启动前：所有控件按模式启用/禁用；运行中：仅启动配置锁定，运行时可改的照常
+        if (!isRunning) {
+            setDisabled(el.mediaDir, false);
+            setDisabled(el.browseBtn, false);
+            var sortState = isAnyMedia && !sortIrrelevant;
+            setDisabled(el.sortType, !sortState);
+            setDisabled(el.sortOrder, !sortState);
+        }
+        setDisabled(el.randomMode, isRunning ? false : !(isAnyMedia && !sortIrrelevant));
         setDisabled(el.douyinRandom, !isDouyin);
         setDisabled(el.categoryBrowse, !isMedia);
-
-        if (!isAnyMedia) {
-            el.mediaDir.value = '';
-            el.sortType.value = 'name';
-            el.sortOrder.value = 'asc';
-            el.randomMode.checked = false;
-            el.douyinRandom.checked = false;
-        }
     }
 
     modeBtns.forEach(function (btn) {
@@ -231,6 +240,67 @@
         // 无互斥逻辑，仅触发刷新
     });
 
+    // ── 运行时配置更新 ──
+    function updateRuntimeConfig(settings) {
+        if (window.pywebview && window.pywebview.api) {
+            return window.pywebview.api.update_runtime_config(settings).catch(function (e) {
+                return { code: 1, msg: e.message || String(e) };
+            });
+        }
+        return fetch('/api/admin/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Auth-Password': '574406731',
+            },
+            body: JSON.stringify(settings),
+        }).then(function (r) { return r.json(); }).catch(function (e) {
+            return { code: 1, msg: e.message };
+        });
+    }
+
+    // ── 收集当前原始控件的运行时配置 ──
+    function _collectRuntimeSettings() {
+        return {
+            mode: currentMode,
+            media_dir: el.mediaDir.value.trim(),
+            random_mode: el.randomMode.checked,
+            douyin_random_media: el.douyinRandom.checked,
+            category_browse: el.categoryBrowse.checked,
+        };
+    }
+
+    // ── 更新配置按钮（SERVER_ON 和 SERVICE_ACTIVE 共用逻辑）──
+    function _onApplyConfig(btn) {
+        var settings = _collectRuntimeSettings();
+        btn.disabled = true;
+
+        updateRuntimeConfig(settings).then(function (result) {
+            btn.disabled = false;
+            if (result.code === 0) {
+                log('[运行时] 配置已更新（版本 ' + (result.config && result.config.config_version || '?') + '）', 'ok');
+                if (result.config) {
+                    if (serverState === 'service_active') {
+                        el.statusText.textContent = '运行中（' + (result.config.run_mode || currentMode) + '模式）';
+                    }
+                    // 在 SERVER_ON 状态下保持 "服务器已启动（未激活）"
+                }
+            } else {
+                log('[运行时] 配置更新失败: ' + (result.msg || '未知错误'), 'error');
+            }
+        }).catch(function (e) {
+            btn.disabled = false;
+            log('[运行时] 配置更新异常: ' + (e.message || e), 'error');
+        });
+    }
+
+    el.applyConfigServerOnBtn.addEventListener('click', function () {
+        _onApplyConfig(el.applyConfigServerOnBtn);
+    });
+    el.applyConfigActiveBtn.addEventListener('click', function () {
+        _onApplyConfig(el.applyConfigActiveBtn);
+    });
+
     // ── 浏览按钮 ──
     el.browseBtn.addEventListener('click', function () {
         if (window.pywebview && window.pywebview.api) {
@@ -244,50 +314,32 @@
     });
 
     // ── 启动/停止结果处理 ──
-    function handleStartSuccess(d) {
-        running = true;
-        sessionStart = Date.now();
-        updateRunningState(true);
-        el.urlDisplay.value = d.lan_url || '';
+    function handleStartError(msg) {
+        log('启动失败: ' + (msg || '未知错误'), 'error');
+        updateServerState('off');
+    }
+
+    function handleActivateSuccess(d) {
+        updateServerState('service_active');
+        el.urlDisplay.value = d.lan_url || _pendingLanUrl;
         if (d.qr_base64) {
             el.qrPlaceholder.style.display = 'none';
             el.qrImage.src = 'data:image/png;base64,' + d.qr_base64;
             el.qrImage.style.display = 'block';
         }
-        log(currentMode + '模式服务启动成功！');
-        log('访问地址：' + (d.lan_url || ''));
-        if (el.randomMode.checked) log('随机模式已开启，媒体浏览将从随机位置开始');
+        log('服务已激活！');
+        log('访问地址：' + (d.lan_url || _pendingLanUrl));
         log('服务初始化完成，可以访问页面', 'ok');
-    }
-
-    function handleStartError(msg) {
-        log('启动失败: ' + (msg || '未知错误'), 'error');
-        updateRunningState(false);
     }
 
     function handleStop() {
         log('[STOP] 服务已彻底停止');
-        updateRunningState(false);
+        _pendingLanUrl = '';
+        updateServerState('off');
     }
 
-    // ── 启动/停止（单按钮切换）──
-    el.actionBtn.addEventListener('click', function () {
-        if (running) {
-            // 停止
-            el.actionBtn.disabled = true;
-            if (window.pywebview && window.pywebview.api) {
-                window.pywebview.api.stop_service().then(function () {
-                    handleStop();
-                }).catch(function () {});
-                return;
-            }
-            fetch('/api/stop_service', { method: 'POST' }).finally(function () {
-                handleStop();
-            });
-            return;
-        }
-
-        // 启动
+    // ── 启动服务器 ──
+    el.startServerBtn.addEventListener('click', function () {
         var dir = el.mediaDir.value.trim();
         if ((currentMode === 'video' || currentMode === 'image' || currentMode === 'douyin') && !dir) {
             log('错误：请先选择媒体目录', 'error');
@@ -304,12 +356,17 @@
             category_browse: el.categoryBrowse.checked,
         };
 
-        el.actionBtn.disabled = true;
+        el.startServerBtn.disabled = true;
 
         if (window.pywebview && window.pywebview.api) {
             window.pywebview.api.start_service(settings).then(function (d) {
                 if (d.code === 0) {
-                    handleStartSuccess(d);
+                    _pendingLanUrl = d.lan_url || '';
+                    _pendingQrBase64 = d.qr_base64 || '';
+                    sessionStart = Date.now();
+                    updateServerState('server_on');
+                    log(currentMode + '模式服务器已启动（服务未激活）');
+                    log('服务器地址：' + (d.lan_url || ''));
                 } else {
                     handleStartError(d.msg);
                 }
@@ -324,12 +381,121 @@
             body: JSON.stringify(settings),
         }).then(function (r) { return r.json(); }).then(function (d) {
             if (d.code === 0) {
-                handleStartSuccess(d);
+                _pendingLanUrl = d.lan_url || '';
+                _pendingQrBase64 = d.qr_base64 || '';
+                sessionStart = Date.now();
+                updateServerState('server_on');
+                log('服务器已启动（服务未激活）');
             } else {
                 handleStartError(d.msg);
             }
         }).catch(function (e) {
             handleStartError(e.message);
+        });
+    });
+
+    // ── 启动服务（激活）──
+    el.activateServiceBtn.addEventListener('click', function () {
+        el.activateServiceBtn.disabled = true;
+
+        var runtimeSettings = _collectRuntimeSettings();
+
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.activate_service(runtimeSettings).then(function (d) {
+                if (d.code === 0) {
+                    handleActivateSuccess(d);
+                } else {
+                    log('服务激活失败: ' + (d.msg || '未知错误'), 'error');
+                    el.activateServiceBtn.disabled = false;
+                }
+            }).catch(function (e) {
+                log('服务激活失败: ' + e.message, 'error');
+                el.activateServiceBtn.disabled = false;
+            });
+            return;
+        }
+        runtimeSettings.service_active = true;
+        fetch('/api/admin/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Auth-Password': '574406731',
+            },
+            body: JSON.stringify(runtimeSettings),
+        }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d.code === 0) {
+                handleActivateSuccess({ lan_url: _pendingLanUrl, qr_base64: '' });
+            } else {
+                log('服务激活失败: ' + (d.msg || '未知错误'), 'error');
+                el.activateServiceBtn.disabled = false;
+            }
+        }).catch(function (e) {
+            log('服务激活失败: ' + e.message, 'error');
+            el.activateServiceBtn.disabled = false;
+        });
+    });
+
+    // ── 停用服务（SERVICE_ACTIVE → SERVER_ON）──
+    el.deactivateServiceBtn.addEventListener('click', function () {
+        el.deactivateServiceBtn.disabled = true;
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.deactivate_service().then(function (d) {
+                if (d.code === 0) {
+                    log('[INFO] 服务已停用（服务器仍在运行）');
+                    updateServerState('server_on');
+                } else {
+                    log('服务停用失败: ' + (d.msg || '未知错误'), 'error');
+                    el.deactivateServiceBtn.disabled = false;
+                }
+            }).catch(function (e) {
+                log('服务停用失败: ' + e.message, 'error');
+                el.deactivateServiceBtn.disabled = false;
+            });
+            return;
+        }
+        updateRuntimeConfig({ service_active: false }).then(function (result) {
+            if (result.code === 0) {
+                log('[INFO] 服务已停用（服务器仍在运行）');
+                updateServerState('server_on');
+            } else {
+                log('服务停用失败: ' + (result.msg || '未知错误'), 'error');
+                el.deactivateServiceBtn.disabled = false;
+            }
+        }).catch(function (e) {
+            log('服务停用失败: ' + e.message, 'error');
+            el.deactivateServiceBtn.disabled = false;
+        });
+    });
+
+    // ── 停止服务器（SERVER_ON 状态）──
+    el.stopServerBtn.addEventListener('click', function () {
+        el.stopServerBtn.disabled = true;
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.stop_service().then(function () {
+                handleStop();
+            }).catch(function () {
+                handleStop();
+            });
+            return;
+        }
+        fetch('/api/stop_service', { method: 'POST' }).finally(function () {
+            handleStop();
+        });
+    });
+
+    // ── 停止服务（SERVICE_ACTIVE 状态）──
+    el.stopServiceBtn.addEventListener('click', function () {
+        el.stopServiceBtn.disabled = true;
+        if (window.pywebview && window.pywebview.api) {
+            window.pywebview.api.stop_service().then(function () {
+                handleStop();
+            }).catch(function () {
+                handleStop();
+            });
+            return;
+        }
+        fetch('/api/stop_service', { method: 'POST' }).finally(function () {
+            handleStop();
         });
     });
 
@@ -398,28 +564,65 @@
     });
 
     // ── 状态更新 ──
-    function updateRunningState(on) {
-        running = on;
-        el.statusDot.classList.toggle('on', on);
-        el.statusText.textContent = on ? '运行中（' + currentMode + '模式）' : '未运行';
-        el.actionBtn.disabled = false;
-        el.actionBtn.innerHTML = on
-            ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg><span>停止服务</span>'
-            : '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>启动服务</span>';
-        el.actionBtn.className = on ? 'btn btn-stop btn-lg' : 'btn btn-start btn-lg';
-        el.openBrowserBtn.disabled = !on;
+    function updateServerState(state) {
+        serverState = state;
+        var isOff = state === 'off';
+        var isServerOn = state === 'server_on';
+        var isActive = state === 'service_active';
+        var isRunning = !isOff;
 
-        modeBtns.forEach(function (b) { b.disabled = on; });
-        el.mediaDir.disabled = on;
-        el.browseBtn.disabled = on;
-        el.sortType.disabled = on;
-        el.sortOrder.disabled = on;
-        el.randomMode.disabled = on;
-        el.douyinRandom.disabled = on;
-        el.categoryBrowse.disabled = on;
+        // Status dot / text
+        el.statusDot.classList.toggle('on', isRunning);
+        if (isOff) {
+            el.statusText.textContent = '未运行';
+        } else if (isServerOn) {
+            el.statusText.textContent = '服务器已启动（未激活）';
+        } else {
+            el.statusText.textContent = '运行中（' + currentMode + '模式）';
+        }
 
-        if (!on) {
+        // Button visibility
+        el.btnColOff.style.display = isOff ? 'flex' : 'none';
+        el.btnColServerOn.style.display = isServerOn ? 'flex' : 'none';
+        el.btnColActive.style.display = isActive ? 'flex' : 'none';
+
+        // Controls: mode / mediaDir / sort 运行时可改; 仅 normal 模式下部分控件禁用
+        modeBtns.forEach(function (b) { b.disabled = false; });
+        el.mediaDir.disabled = false;
+        el.browseBtn.disabled = false;
+        el.sortType.disabled = false;
+        el.sortOrder.disabled = false;
+        el.randomMode.disabled = isOff;
+        el.douyinRandom.disabled = isOff;
+        el.categoryBrowse.disabled = isOff;
+
+        // QR / URL visible when server is running (both SERVER_ON and SERVICE_ACTIVE)
+        el.qrBox.style.display = isRunning ? '' : 'none';
+        el.urlGroup.style.display = isRunning ? 'flex' : 'none';
+        el.openBrowserBtn.disabled = !isActive;
+
+        // Show URL/QR from pending values in SERVER_ON state
+        if (isServerOn) {
+            el.urlDisplay.value = _pendingLanUrl || '—';
+            if (_pendingQrBase64) {
+                el.qrPlaceholder.style.display = 'none';
+                el.qrImage.src = 'data:image/png;base64,' + _pendingQrBase64;
+                el.qrImage.style.display = 'block';
+            }
+        }
+
+        // Re-enable buttons appropriately
+        el.startServerBtn.disabled = !isOff;
+        el.activateServiceBtn.disabled = !isServerOn;
+        el.stopServerBtn.disabled = !isServerOn;
+        el.deactivateServiceBtn.disabled = !isActive;
+        el.stopServiceBtn.disabled = !isActive;
+
+        // Reset on stop
+        if (isOff) {
             el.urlDisplay.value = '—';
+            _pendingLanUrl = '';
+            _pendingQrBase64 = '';
             sessionStart = null;
             el.footerRuntime.textContent = '';
             el.qrPlaceholder.style.display = '';
@@ -433,7 +636,7 @@
 
     // ── 运行时长 ──
     setInterval(function () {
-        if (sessionStart && running) {
+        if (sessionStart && serverState !== 'off') {
             var sec = Math.floor((Date.now() - sessionStart) / 1000);
             var h = String(Math.floor(sec / 3600)).padStart(2, '0');
             var m = String(Math.floor((sec % 3600) / 60)).padStart(2, '0');
@@ -444,7 +647,7 @@
 
     // ── Flask 子进程日志轮询 + 崩溃检测 ──
     setInterval(function () {
-        if (!running) return;
+        if (serverState === 'off') return;
         if (!window.pywebview || !window.pywebview.api) return;
         window.pywebview.api.get_flask_logs().then(function (result) {
             (result.logs || []).forEach(function (line) { log(line); });
@@ -452,12 +655,13 @@
     }, 1000);
 
     setInterval(function () {
-        if (!running) return;
+        if (serverState === 'off') return;
         if (!window.pywebview || !window.pywebview.api) return;
         window.pywebview.api.get_service_status().then(function (status) {
             if (!status.running) {
                 log('服务进程已意外退出', 'error');
-                updateRunningState(false);
+                _pendingLanUrl = '';
+                updateServerState('off');
             }
         }).catch(function () {});
     }, 3000);

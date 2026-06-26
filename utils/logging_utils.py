@@ -143,9 +143,8 @@ def log_access(request_obj, action, path, details='', duration=0):
     # 预览去重：同一会话同一文件仅记录一次
     if action in ('PREVIEW', 'RAW_PREVIEW'):
         cache_key = (context['session_id'], normalized_path)
-        if cache_key in cache_manager.preview_cache:
+        if cache_manager.check_and_set_preview_cache(cache_key):
             return
-        cache_manager.preview_cache[cache_key] = time.time()
 
     # 精简日志消息格式，只保留核心信息
     log_msg = f"{context['client_ip']} | {action} | {normalized_path}"

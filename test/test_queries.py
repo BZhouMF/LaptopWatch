@@ -165,27 +165,27 @@ class TestGetChildren:
 class TestGetMediaPage:
 
     def test_pagination_limit(self, conn):
-        rows, total = get_media_page(conn, 'image', 1, 0)
+        rows, total = get_media_page(conn, 'image', 1, 0, count_total=True)
         assert len(rows) == 1
         assert total == 3
 
     def test_pagination_offset(self, conn):
-        first, total = get_media_page(conn, 'image', 1, 0)
+        first, total = get_media_page(conn, 'image', 1, 0, count_total=True)
         second, _ = get_media_page(conn, 'image', 1, 1)
         assert first[0]['path'] != second[0]['path']
 
     def test_pagination_all(self, conn):
-        rows, total = get_media_page(conn, 'image', 100, 0)
+        rows, total = get_media_page(conn, 'image', 100, 0, count_total=True)
         assert len(rows) == total == 3
 
     def test_empty_prefix(self, conn):
         rows, total = get_media_page(conn, 'image', 10, 0,
-                                     media_dir='/nonexistent')
+                                     media_dir='/nonexistent', count_total=True)
         assert rows == []
         assert total == 0
 
     def test_video_type(self, conn):
-        rows, total = get_media_page(conn, 'video', 10, 0)
+        rows, total = get_media_page(conn, 'video', 10, 0, count_total=True)
         assert len(rows) == 2
         assert total == 2
 
@@ -240,7 +240,7 @@ class TestGetDirectMedia:
         """只返回直接子文件，不返回孙文件夹中的文件"""
         # parent_id=1: img1.jpg, img2.jpg, vid1.mp4, vid2.mp4 (4个直接媒体文件)
         # parent_id=10: sub_img.jpg (孙文件，不应返回)
-        rows, total = get_direct_media(conn, 1, 'image')
+        rows, total = get_direct_media(conn, 1, 'image', count_total=True)
         assert total == 2  # img1.jpg, img2.jpg
         paths = {r['path'] for r in rows}
         assert '/root/img1.jpg' in paths
@@ -249,18 +249,18 @@ class TestGetDirectMedia:
 
     def test_only_direct_files_video(self, conn):
         """视频类型也只返回直接子文件"""
-        rows, total = get_direct_media(conn, 1, 'video')
+        rows, total = get_direct_media(conn, 1, 'video', count_total=True)
         assert total == 2  # vid1.mp4, vid2.mp4
 
     def test_subfolder_direct_files(self, conn):
         """子文件夹的直接文件"""
-        rows, total = get_direct_media(conn, 10, 'image')
+        rows, total = get_direct_media(conn, 10, 'image', count_total=True)
         assert total == 1  # sub_img.jpg
         assert rows[0]['path'] == '/root/a_folder/sub_img.jpg'
 
     def test_empty_folder(self, conn):
         """无媒体文件的文件夹返回空"""
-        rows, total = get_direct_media(conn, 999, 'video')
+        rows, total = get_direct_media(conn, 999, 'video', count_total=True)
         assert rows == []
         assert total == 0
 
@@ -284,7 +284,7 @@ class TestGetDirectMedia:
 
     def test_pagination(self, conn):
         """分页参数生效"""
-        rows, total = get_direct_media(conn, 1, 'image', limit=1, offset=0)
+        rows, total = get_direct_media(conn, 1, 'image', limit=1, offset=0, count_total=True)
         assert len(rows) == 1
         assert total == 2
 

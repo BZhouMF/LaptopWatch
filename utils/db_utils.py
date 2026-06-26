@@ -263,10 +263,14 @@ def _upsert_media(conn, parent_id, entry, mtime, is_dir):
             (parent_id, entry.name, mtime, existing[0]),
         )
     else:
+        # 图片文件预生成封面，消除首次访问的实时生成延迟
+        cover_blob = None
+        if media_type == 'image':
+            cover_blob = _generate_image_cover(entry_path)
         conn.execute(
             "INSERT INTO media (parent_id, name, media_type, path, modify_time, cover) "
-            "VALUES (?, ?, ?, ?, ?, NULL)",
-            (parent_id, entry.name, media_type, entry_path, mtime),
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (parent_id, entry.name, media_type, entry_path, mtime, cover_blob),
         )
     return True
 
@@ -407,7 +411,7 @@ def get_children(conn, parent_id, sort_type='name', sort_order='asc'):
 
 
 def get_media_page(conn, media_type, limit, offset,
-                   sort_type='name', sort_order='asc', media_dir=None):
+                   sort_type='name', sort_order='asc', media_dir=None, count_total=False):
     """分页取媒体文件
 
     media_type: 'video' | 'image'
@@ -420,10 +424,12 @@ def get_media_page(conn, media_type, limit, offset,
         where += " AND m.path LIKE ?"
         params.append(media_prefix + '%')
 
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM media m JOIN nodes n ON n.path = m.path "
-        f"WHERE {where}", params,
-    ).fetchone()[0]
+    total = 0
+    if count_total:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM media m JOIN nodes n ON n.path = m.path "
+            f"WHERE {where}", params,
+        ).fetchone()[0]
 
     order_col = 'm.modify_time' if sort_type == 'time' else 'm.name'
     order_dir = 'DESC' if sort_order == 'desc' else 'ASC'
@@ -490,7 +496,7 @@ def get_subfolder_nodes(conn, parent_id, sort_type='name', sort_order='asc'):
 
 
 def get_direct_media(conn, parent_id, media_type, sort_type='name',
-                     sort_order='asc', limit=None, offset=0):
+                     sort_order='asc', limit=None, offset=0, count_total=False):
     """查询某个文件夹的直接子媒体文件（不递归子文件夹）
 
     用 m.parent_id = ? 精确匹配，仅返回直接子文件。
@@ -501,11 +507,13 @@ def get_direct_media(conn, parent_id, media_type, sort_type='name',
 
     params = [media_type, parent_id]
 
-    total = conn.execute(
-        "SELECT COUNT(*) FROM media m JOIN nodes n ON n.path = m.path "
-        "WHERE m.media_type = ? AND m.parent_id = ? AND n.type = 2",
-        params,
-    ).fetchone()[0]
+    total = 0
+    if count_total:
+        total = conn.execute(
+            "SELECT COUNT(*) FROM media m JOIN nodes n ON n.path = m.path "
+            "WHERE m.media_type = ? AND m.parent_id = ? AND n.type = 2",
+            params,
+        ).fetchone()[0]
 
     query = (
         f"SELECT m.id, m.parent_id, m.name, m.path, m.modify_time, m.media_type "
@@ -518,7 +526,7 @@ def get_direct_media(conn, parent_id, media_type, sort_type='name',
         params += [limit, offset]
     rows = conn.execute(query, params).fetchall()
 
-    return [dict(r) for r in rows], total
+    return [dict(r) for r in rows], total if count_total else len(rows)
 
 
 # ---------------------------------------------------------------------------

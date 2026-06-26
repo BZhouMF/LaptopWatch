@@ -98,15 +98,28 @@ function MediaCard({ file, on_click }: { file: MediaItem; on_click: () => void }
 
 // ─── Component ────────────────────────────────────────
 
+interface ModeConfig {
+  page_first: number;
+  page_load: number;
+}
+
 export default function CategoryBrowsePage() {
   const navigate = useNavigate();
 
   const [nav_stack, set_nav_stack] = useState<NavEntry[]>([]);
   const [current_index, set_current_index] = useState(-1);
   const [is_loading, set_is_loading] = useState(false);
+  const [mode_config, set_mode_config] = useState<ModeConfig>({ page_first: 28, page_load: 28 });
   const grid_abort_ref = useRef<AbortController | null>(null);
 
   const current_entry = nav_stack[current_index] || null;
+
+  // Fetch mode config for page size
+  useEffect(() => {
+    api_client.get<ModeConfig>("/api/mode")
+      .then((resp) => set_mode_config(resp.data))
+      .catch(() => {});
+  }, []);
 
   // ── Stack persistence ───────────────────────────────
 
@@ -238,8 +251,8 @@ export default function CategoryBrowsePage() {
         parent_path,
         current_page: 1,
         page_cache: {},
-        page_first: 35,
-        page_load: 35,
+        page_first: mode_config.page_first,
+        page_load: mode_config.page_load,
       };
       const new_index = current_index + 1;
       set_nav_stack((prev) => {
@@ -253,7 +266,7 @@ export default function CategoryBrowsePage() {
         window.history.pushState({ spaIndex: new_index }, "");
       }
     },
-    [current_index]
+    [current_index, mode_config]
   );
 
   const navigate_to_grid = useCallback(
@@ -272,11 +285,37 @@ export default function CategoryBrowsePage() {
     window.history.replaceState({ spaIndex: current_index - 1 }, "");
   }, [current_index, navigate]);
 
+  const do_refresh = useCallback(async () => {
+    if (!current_entry) return;
+    set_is_loading(true);
+    try {
+      if (current_entry.view === "category") {
+        const folder_path = current_entry.data.folder_path || "";
+        await api_client.get("/category/data", { params: { path: folder_path, refresh: "1" } });
+        // Reload by navigating to the same category
+        await navigate_to_category(folder_path, false);
+      } else {
+        const entry = current_entry as GridEntry;
+        await api_client.get("/category/grid_more", {
+          params: { path: entry.folder_path, offset: 0, limit: entry.page_first, refresh: "1" },
+        });
+        entry.page_cache = {};
+        entry.current_page = 1;
+        set_nav_stack((prev) => [...prev]);
+      }
+    } catch { /* ignore */ }
+    finally { set_is_loading(false); }
+  }, [current_entry, navigate_to_category]);
+
   // ── Grid operations ──────────────────────────────────
 
   const grid_load_page = useCallback(
     async (entry: GridEntry, page: number) => {
-      if (entry.page_cache[page]) return;
+      if (entry.page_cache[page]) {
+        entry.current_page = page;
+        set_nav_stack((prev) => [...prev]);
+        return;
+      }
 
       grid_abort_ref.current?.abort();
       const controller = new AbortController();
@@ -399,13 +438,12 @@ export default function CategoryBrowsePage() {
           <h1 className="text-base font-semibold text-text-primary truncate">
             {info.folder_name}
           </h1>
-          <a
-            href={`/category/browse/${encodeURIComponent(parent_path)}?refresh=1`}
+          <button
+            onClick={do_refresh}
             className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-bg-card-hover hover:text-text-primary"
-            data-spa-nav="ignore"
           >
             刷新
-          </a>
+          </button>
         </div>
 
         {/* Content */}
@@ -421,18 +459,16 @@ export default function CategoryBrowsePage() {
                     </span>
                   )}
                 </h2>
-                {cat.has_more && (
-                  <a
-                    href="#"
-                    data-spa-nav="category"
-                    data-spa-path={cat.path}
-                    className="shrink-0 text-xs font-medium text-accent hover:text-accent-hover transition"
-                  >
-                    查看更多 →
-                  </a>
-                )}
+                <a
+                  href="#"
+                  data-spa-nav="category"
+                  data-spa-path={cat.path}
+                  className="shrink-0 rounded-md bg-accent px-3 py-1 text-xs font-medium text-white transition hover:bg-accent-hover"
+                >
+                  显示更多
+                </a>
               </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
                 {cat.files.slice(0, 10).map((file) => (
                   <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
@@ -449,7 +485,7 @@ export default function CategoryBrowsePage() {
                   <span className="ml-1.5 text-xs font-normal text-text-muted">({info.root_files.length})</span>
                 </h2>
               </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
                 {info.root_files.map((file) => (
                   <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
@@ -505,12 +541,12 @@ export default function CategoryBrowsePage() {
         <h1 className="text-base font-semibold text-text-primary truncate">
           {grid_entry.folder_name}
         </h1>
-        <a
-          href={`/category/grid/${encodeURIComponent(grid_entry.folder_path)}?refresh=1`}
+        <button
+          onClick={do_refresh}
           className="ml-auto shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-bg-card-hover hover:text-text-primary"
         >
           刷新
-        </a>
+        </button>
       </div>
 
       {/* Grid Content */}
@@ -528,7 +564,7 @@ export default function CategoryBrowsePage() {
             <p className="text-text-muted">此目录没有媒体文件</p>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
             {grid_items.map((file) => (
               <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
             ))}

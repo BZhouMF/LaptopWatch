@@ -1,9 +1,10 @@
 """核心蓝图模块
 包含 API 路由、旧版兼容重定向和 Setup 配置接口
 """
-from flask import Blueprint, request
+from flask import Blueprint, request, session
 from config import config
 from utils.file_utils import get_drives
+from utils.logging_utils import logger
 from blueprints.auth import login_required
 
 core_bp = Blueprint('core', __name__)
@@ -23,6 +24,7 @@ def api_mode():
         'run_mode': config.RUN_MODE,
         'category_browse': config.CATEGORY_BROWSE,
         'random_mode': config.RANDOM_MODE,
+        'douyin_random_media': config.DOUYIN_RANDOM_MEDIA,
         'page_first': config.PAGE_FIRST,
         'page_load': config.PAGE_LOAD,
     }
@@ -32,6 +34,14 @@ def api_mode():
 def favicon():
     """空favicon响应"""
     return '', 204
+
+@core_bp.route('/api/config-version', methods=['GET'])
+def api_config_version():
+    """返回当前配置版本号 — 供 React 前端轮询检测配置变更"""
+    return {
+        'version': config.CONFIG_VERSION,
+        'service_active': config.SERVICE_ACTIVE,
+    }
 
 # ==================== 旧版路由兼容重定向 ====================
 # 以下路由为历史遗留的兼容性重定向，将旧版URL映射到新的蓝图前缀
@@ -158,3 +168,39 @@ def api_stop_service():
     config.DOUYIN_RANDOM_MEDIA = False
     config.CATEGORY_BROWSE = False
     return {'code': 0, 'msg': '服务已停止'}
+
+
+@core_bp.route('/api/admin/config', methods=['POST'])
+def api_admin_config():
+    """运行时更新配置 — 支持 session 登录或 X-Auth-Password 头部认证"""
+    # ── 认证：优先 session，其次密码头部 ──
+    if not session.get('logged_in'):
+        password = request.headers.get('X-Auth-Password', '')
+        if password != config.DEFAULT_PASSWORD:
+            return {'code': 1, 'msg': '未授权'}, 401
+
+    body = request.get_json(silent=True) or {}
+
+    mode = body.get('mode')
+    category_browse = body.get('category_browse')
+    random_mode = body.get('random_mode')
+    douyin_random_media = body.get('douyin_random_media')
+    service_active = body.get('service_active')
+    media_dir = body.get('media_dir')
+
+    if mode is not None and mode not in ('normal', 'video', 'image', 'douyin'):
+        return {'code': 1, 'msg': f'无效的运行模式: {mode}'}, 400
+
+    ok, result = config.update_runtime(
+        mode=mode,
+        category_browse=category_browse,
+        random_mode=random_mode,
+        douyin_random_media=douyin_random_media,
+        service_active=service_active,
+        media_dir=media_dir,
+    )
+    if not ok:
+        return result, 400
+
+    logger.info(f'[ADMIN] 运行时配置已更新: {result}')
+    return {'code': 0, 'msg': '配置已更新', 'config': result}
