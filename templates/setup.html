@@ -103,25 +103,17 @@
                     </section>
                 </div>
 
-                <!-- 服务控制 — 扁平按钮，灰显代替隐藏 -->
+                <!-- 服务控制 — 3 按钮，始终等宽排列 -->
                 <section class="card card-service">
                     <div class="service-layout">
                         <div class="btn-row" style="gap:10px;flex-wrap:wrap">
-                            <button class="btn btn-start" id="startServerBtn">
+                            <button class="btn btn-start" id="powerBtn">
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                                <span>启动服务器</span>
+                                <span id="powerBtnLabel">启动服务器</span>
                             </button>
-                            <button class="btn btn-start" id="activateServiceBtn" disabled>
+                            <button class="btn btn-start" id="activeBtn" disabled>
                                 <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                                <span>启动服务</span>
-                            </button>
-                            <button class="btn btn-stop" id="deactivateServiceBtn" disabled>
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                                <span>停用服务</span>
-                            </button>
-                            <button class="btn btn-stop" id="stopBtn" disabled>
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-                                <span id="stopBtnLabel">停止服务器</span>
+                                <span id="activeBtnLabel">启动服务</span>
                             </button>
                             <button class="btn btn-outline" id="applyConfigBtn" disabled>
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
