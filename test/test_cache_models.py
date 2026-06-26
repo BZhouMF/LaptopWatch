@@ -1,6 +1,6 @@
 """缓存管理模块测试"""
 import time
-from models.cache_models import CacheManager, cache_manager
+from utils.cache_utils import CacheManager, cache_manager
 
 
 class TestCacheManager:
@@ -67,5 +67,5 @@ class TestCacheManager:
         assert ('new', '2') in cache.preview_cache
 
     def test_global_cache_manager_exists(self):
-        from models.cache_models import cache_manager
+        from utils.cache_utils import cache_manager
         assert isinstance(cache_manager, CacheManager)

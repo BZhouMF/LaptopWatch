@@ -12,7 +12,7 @@ from logging.handlers import TimedRotatingFileHandler
 from flask import session, request
 
 from config import config
-from models.cache_models import cache_manager
+from utils.cache_utils import cache_manager
 
 def _safe_print(*args, **kwargs):
     """安全打印，处理 Windows 控制台输出异常"""

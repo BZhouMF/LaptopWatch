@@ -8,7 +8,7 @@ from io import BytesIO
 
 from config import config
 from utils.logging_utils import logger
-from models.cache_models import cache_manager
+from utils.cache_utils import cache_manager
 
 # 尝试导入图像处理库
 try:
