@@ -829,8 +829,7 @@ def main():
         js_api=_DesktopApi(),
         width=900,
         height=700,
-        resizable=True,
-        min_size=(700, 600),
+        resizable=False,
     )
     webview.start(icon=str(Path(__file__).parent / 'BB.ico'), debug=False)
 
