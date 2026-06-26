@@ -13,6 +13,8 @@ import datetime
 import subprocess
 import threading
 import queue
+import urllib.request
+import urllib.error
 from pathlib import Path
 from functools import wraps
 
@@ -111,12 +113,14 @@ def api_status():
     pids = check_port(SERVICE_PORT)
     running = len(pids) > 0
     url = f'http://{get_local_ip()}:{SERVICE_PORT}' if running else ''
+    service_active = _check_flask_service_active() if running else False
     return jsonify({
         'code': 0,
         'data': {
             'running': running,
             'pid': pids[0] if pids else None,
             'url': url,
+            'service_active': service_active,
             'config': mgmt_config,
         }
     })
@@ -213,6 +217,7 @@ def api_start():
     env['LAPTOPWATCH_CATEGORY_BROWSE'] = 'true' if req_category_browse else 'false'
     env['LAPTOPWATCH_GUI_LAUNCH'] = '1'
     env['LAPTOPWATCH_DOUYIN_RANDOM_MEDIA'] = 'true' if req_douyin_random else 'false'
+    env['LAPTOPWATCH_SERVICE_ACTIVE'] = 'false'
 
     # 启动子进程
     try:
@@ -346,6 +351,104 @@ def api_stop():
         session_id = None
 
     return jsonify({'code': 0, 'msg': '服务已停止'})
+
+
+# ==================== 服务激活/停用/配置 API ====================
+
+def _flask_post(body_dict):
+    """POST JSON 到 Flask /api/admin/config，返回 (ok, result_dict)"""
+    try:
+        data = json.dumps(body_dict).encode('utf-8')
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{SERVICE_PORT}/api/admin/config',
+            data=data,
+            headers={
+                'Content-Type': 'application/json',
+                'X-Auth-Password': config.DEFAULT_PASSWORD,
+            },
+            method='POST',
+        )
+        resp = urllib.request.urlopen(req, timeout=5)
+        result = json.loads(resp.read().decode('utf-8'))
+        return result.get('code') == 0, result
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode('utf-8'))
+            return False, body
+        except Exception:
+            return False, {'code': 1, 'msg': f'HTTP {exc.code}: {exc.reason}'}
+    except Exception as exc:
+        return False, {'code': 1, 'msg': str(exc)}
+
+
+def _check_flask_service_active():
+    """查询 Flask 服务是否已激活（通过 /api/config-version）"""
+    try:
+        req = urllib.request.Request(
+            f'http://127.0.0.1:{SERVICE_PORT}/api/config-version',
+            headers={'X-Auth-Password': config.DEFAULT_PASSWORD},
+        )
+        resp = urllib.request.urlopen(req, timeout=2)
+        data = json.loads(resp.read().decode('utf-8'))
+        return data.get('service_active', False)
+    except Exception:
+        return False
+
+
+@qid_app.route('/api/activate', methods=['POST'])
+@login_required
+def api_activate():
+    """激活 Flask 服务：设置 service_active=true + 应用当前配置"""
+    body = request.get_json() or {}
+    payload = {'service_active': True}
+    for key in ('mode', 'media_dir', 'random_mode', 'douyin_random_media', 'category_browse'):
+        if key in body:
+            payload[key] = body[key]
+
+    # 同步回全局 mgmt_config
+    updatable = {'mode': 'mode', 'media_dir': 'media_dir', 'random_mode': 'random',
+                 'douyin_random_media': 'douyin_random_media', 'category_browse': 'category_browse'}
+    for flask_key, mgmt_key in updatable.items():
+        if flask_key in body:
+            mgmt_config[mgmt_key] = body[flask_key]
+
+    ok, result = _flask_post(payload)
+    if ok:
+        add_log('[INFO] 服务已激活')
+        return jsonify({'code': 0, 'msg': '服务已激活', 'data': result.get('config', {})})
+    add_log(f'[ERROR] 服务激活失败: {result.get("msg", "未知错误")}')
+    return jsonify(result)
+
+
+@qid_app.route('/api/deactivate', methods=['POST'])
+@login_required
+def api_deactivate():
+    """停用 Flask 服务：设置 service_active=false"""
+    ok, result = _flask_post({'service_active': False})
+    if ok:
+        add_log('[INFO] 服务已停用（服务器仍在运行）')
+        return jsonify({'code': 0, 'msg': '服务已停用'})
+    add_log(f'[ERROR] 服务停用失败: {result.get("msg", "未知错误")}')
+    return jsonify(result)
+
+
+@qid_app.route('/api/apply-config', methods=['POST'])
+@login_required
+def api_apply_config():
+    """更新 Flask 运行时配置（不改变 service_active 状态）"""
+    body = request.get_json() or {}
+    # 同步回全局 mgmt_config
+    updatable = {'mode': 'mode', 'media_dir': 'media_dir', 'random_mode': 'random',
+                 'douyin_random_media': 'douyin_random_media', 'category_browse': 'category_browse'}
+    for flask_key, mgmt_key in updatable.items():
+        if flask_key in body:
+            mgmt_config[mgmt_key] = body[flask_key]
+    ok, result = _flask_post(body)
+    if ok:
+        add_log('[INFO] 运行时配置已更新')
+        return jsonify({'code': 0, 'msg': '配置已更新', 'data': result.get('config', {})})
+    add_log(f'[ERROR] 配置更新失败: {result.get("msg", "未知错误")}')
+    return jsonify(result)
 
 
 # ==================== 终止全部服务 API ====================
