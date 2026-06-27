@@ -4,6 +4,7 @@
 """
 import os
 import time
+import threading
 import tempfile
 import zipfile
 import urllib.parse
@@ -118,8 +119,19 @@ def download_folder():
             logger.error(f"压缩文件夹失败 {abs_path}: {e}", exc_info=True)
             os.unlink(zip_path)
             return f'压缩失败: {str(e)}', 500
+        # 兜底清理定时器：客户端断连时 after_this_request 可能不触发
+        _cleanup_done = False
+        _fallback_timer = threading.Timer(1800, lambda: (
+            os.unlink(zip_path) if not _cleanup_done and os.path.exists(zip_path) else None
+        ))
+        _fallback_timer.daemon = True
+        _fallback_timer.start()
+
         @after_this_request
         def cleanup(response):
+            nonlocal _cleanup_done
+            _cleanup_done = True
+            _fallback_timer.cancel()
             try:
                 os.unlink(zip_path)
             except Exception as e:
@@ -134,6 +146,7 @@ def download_folder():
                              mimetype='application/zip')
         except Exception:
             # send_file 失败（如客户端断连），立即清理，防止临时文件残留
+            _fallback_timer.cancel()
             try:
                 os.unlink(zip_path)
             except Exception:
@@ -214,8 +227,19 @@ def download_selected():
         except Exception as e:
             os.unlink(zip_path)
             return f'压缩失败: {str(e)}', 500
+        # 兜底清理定时器：客户端断连时 after_this_request 可能不触发
+        _cleanup_done = False
+        _fallback_timer = threading.Timer(1800, lambda: (
+            os.unlink(zip_path) if not _cleanup_done and os.path.exists(zip_path) else None
+        ))
+        _fallback_timer.daemon = True
+        _fallback_timer.start()
+
         @after_this_request
         def cleanup(response):
+            nonlocal _cleanup_done
+            _cleanup_done = True
+            _fallback_timer.cancel()
             try:
                 os.unlink(zip_path)
             except Exception as e:
@@ -228,6 +252,7 @@ def download_selected():
                              download_name=f'{folder_name}.zip',
                              mimetype='application/zip')
         except Exception:
+            _fallback_timer.cancel()
             try:
                 os.unlink(zip_path)
             except Exception:
