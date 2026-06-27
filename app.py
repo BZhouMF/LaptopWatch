@@ -249,4 +249,4 @@ if __name__ == '__main__':
     print(f"LaptopWatch 启动中... 模式: {config.RUN_MODE}")
     print(f"  Flask  (页面/API): http://0.0.0.0:{port}")
     print(f"  FastAPI (视频流):  http://0.0.0.0:{config.VIDEO_SERVE_PORT}")
-    serve(app, host='0.0.0.0', port=port, threads=16)
+    serve(app, host='0.0.0.0', port=port, threads=64)
