@@ -110,6 +110,7 @@ def _db_load_more(offset, limit, is_random):
                 sort_type=config.SORT_TYPE,
                 sort_order=config.SORT_ORDER,
                 random_start=False,
+                skip_sync=(offset > 0),
             )
         conn.close()
 

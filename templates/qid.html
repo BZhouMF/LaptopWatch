@@ -94,6 +94,13 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; lin
 .dir-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 14px; }
 .dir-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .dir-actions .btn { padding: 8px 20px; flex: none; }
+
+@media (max-width: 420px) {
+    .checkbox-row { gap: 8px; }
+    .checkbox label { font-size: 11px; }
+    .action-buttons { gap: 6px; }
+    .action-buttons .btn { padding: 12px 6px; font-size: 12px; }
+}
 </style>
 </head>
 <body>
@@ -381,13 +388,13 @@ document.getElementById('powerBtn').addEventListener('click', function() {
     if ((cfg.mode === 'video' || cfg.mode === 'image' || cfg.mode === 'douyin') && !cfg.media_dir) {
         showToast('error', '请先选择媒体目录'); return;
     }
-    powerBtn.disabled = true; powerBtn.textContent = '启动中...';
+    powerBtn.disabled = true;
+    document.getElementById('powerBtnLabel').textContent = '启动中...';
     fetch('/api/start', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) })
         .then(r => r.json()).then(function(data) {
-            powerBtn.textContent = '';
             if (data.code === 0) { showToast('success', '服务器已启动'); refreshStatus(); }
             else { showToast('error', data.msg || '启动失败'); powerBtn.disabled = false; }
-        }).catch(function() { powerBtn.textContent = ''; powerBtn.disabled = false; showToast('error', '网络请求失败'); });
+        }).catch(function() { powerBtn.disabled = false; showToast('error', '网络请求失败'); });
 });
 
 // ── activeBtn: 激活服务 / 停用服务 ──

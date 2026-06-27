@@ -410,8 +410,7 @@ def get_children(conn, parent_id, sort_type='name', sort_order='asc'):
     return [dict(r) for r in rows]
 
 
-def get_media_page(conn, media_type, limit, offset,
-                   sort_type='name', sort_order='asc', media_dir=None, count_total=False):
+def get_media_page(conn, media_type, limit, offset,sort_type='name', sort_order='asc', media_dir=None, count_total=False):
     """分页取媒体文件
 
     media_type: 'video' | 'image'

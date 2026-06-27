@@ -296,10 +296,16 @@ export default function CategoryBrowsePage() {
         await navigate_to_category(folder_path, false);
       } else {
         const entry = current_entry as GridEntry;
-        await api_client.get("/category/grid_more", {
+        const resp = await api_client.get<{
+          code: number; data: MediaItem[]; has_more: boolean;
+        }>("/category/grid_more", {
           params: { path: entry.folder_path, offset: 0, limit: entry.page_first, refresh: "1" },
         });
-        entry.page_cache = {};
+        if (resp.data.code === 0) {
+          entry.page_cache = { 1: { items: resp.data.data, has_more: resp.data.has_more } };
+        } else {
+          entry.page_cache = {};
+        }
         entry.current_page = 1;
         set_nav_stack((prev) => [...prev]);
       }
@@ -468,7 +474,7 @@ export default function CategoryBrowsePage() {
                   显示更多
                 </a>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
+              <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2 px-4">
                 {cat.files.slice(0, 10).map((file) => (
                   <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
@@ -485,7 +491,7 @@ export default function CategoryBrowsePage() {
                   <span className="ml-1.5 text-xs font-normal text-text-muted">({info.root_files.length})</span>
                 </h2>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2.5 px-4">
+              <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2 px-4">
                 {info.root_files.map((file) => (
                   <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
@@ -564,7 +570,7 @@ export default function CategoryBrowsePage() {
             <p className="text-text-muted">此目录没有媒体文件</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3">
+          <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2">
             {grid_items.map((file) => (
               <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
             ))}

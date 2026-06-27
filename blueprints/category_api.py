@@ -52,6 +52,7 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
                 offset=offset, limit=limit,
                 sort_type=config.SORT_TYPE,
                 sort_order=config.SORT_ORDER,
+                skip_sync=(offset > 0),
             )
             conn.close()
             return files, has_more
@@ -123,6 +124,12 @@ def category_grid_more():
 
         if not str(full_path).startswith(str(config.MEDIA_DIR.resolve())):
             return jsonify({'code': 1, 'msg': '非法访问'}), 403
+
+        # 手动刷新 → 清除节流阀 + 缓存，强制重新扫描
+        if request.args.get('refresh') == '1':
+            with _scanned_folders_lock:
+                _scanned_folders.discard(str(full_path))
+            invalidate_cache(str(full_path))
 
         _sync_db(str(full_path))
 

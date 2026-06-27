@@ -105,16 +105,23 @@ def _format_db_row(r):
 # ==================== 目录浏览模式工具函数 ====================
 
 _would_redirect_cache: dict[str, bool] = {}
+_category_info_cache: dict[str, dict] = {}
 _cache_lock = threading.Lock()
 
 
 def invalidate_cache(clear_key: str | None = None):
-    """清除重定向缓存，clear_key 为 None 时全清空"""
+    """清除重定向和分类信息缓存，clear_key 为 None 时全清空"""
     with _cache_lock:
         if clear_key is None:
             _would_redirect_cache.clear()
+            _category_info_cache.clear()
         else:
-            _would_redirect_cache.pop(str(clear_key), None)
+            key = str(clear_key)
+            _would_redirect_cache.pop(key, None)
+            # 清除以此路径为前缀的所有缓存（处理子目录变更影响父目录聚合）
+            for k in list(_category_info_cache.keys()):
+                if k == key or k.startswith(key + os.sep):
+                    _category_info_cache.pop(k, None)
 
 
 def _collect_files_recursive(folder_path, limit, run_mode, conn=None):
@@ -200,21 +207,15 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
     else:
         folder_rel_path = os.path.relpath(rel_base, media_dir_str).replace('\\', '/')
 
+    # 检查缓存（非 refresh 路径，already_synced 为 set 说明不会重新 sync）
+    cache_key = f"{rel_base}:{run_mode}:{random_mode}:{limit}"
+    if already_synced is not None:
+        with _cache_lock:
+            cached = _category_info_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
     folder_name = folder_path.name if folder_rel_path else config.MEDIA_DIR.name
-
-    # 检查是否有子文件夹
-    subfolders = _get_sorted_subfolders(folder_path)
-    is_leaf = len(subfolders) == 0
-
-    result = {
-        'folder_name': folder_name,
-        'folder_path': folder_rel_path,
-        'is_leaf': is_leaf,
-        'categories': [],
-        'root_files': [],
-        'total_categories': 0,
-        'single_leaf_override': False
-    }
 
     # 收集根目录下的直接文件（仅当前文件夹，不递归子文件夹）
     media_type = 'video' if run_mode in ('video', 'douyin') else 'image'
@@ -225,6 +226,20 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
             shared_conn = get_db()
         else:
             shared_conn = conn
+
+        # 检查是否有子文件夹（复用共享连接）
+        subfolders = _get_sorted_subfolders(folder_path, conn=shared_conn)
+        is_leaf = len(subfolders) == 0
+
+        result = {
+            'folder_name': folder_name,
+            'folder_path': folder_rel_path,
+            'is_leaf': is_leaf,
+            'categories': [],
+            'root_files': [],
+            'total_categories': 0,
+            'single_leaf_override': False
+        }
         node = get_node_by_path(shared_conn, str(folder_path))
         if node:
             rows, _ = get_direct_media(
@@ -284,6 +299,9 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
             or result['total_categories'] == 0
             or (result['single_leaf_override'] and result['total_categories'] == 1)
         )
+        # 缓存完整分类数据，仅当已有节流保护时（非首次加载 / 非 refresh）
+        if already_synced is not None:
+            _category_info_cache[cache_key] = result
 
     return result
 
