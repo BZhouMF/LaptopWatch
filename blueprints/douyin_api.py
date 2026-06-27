@@ -34,8 +34,15 @@ def _format_video(row):
     }
 
 
+def _ensure_media_synced(conn):
+    """确保 media 表已建表并同步媒体根目录（仅会话初始化时调用一次）"""
+    from utils.db_utils import init_tables, sync_folder
+    init_tables(conn)
+    sync_folder(conn, str(config.MEDIA_DIR))
+
+
 def _pick_random_video(exclude_paths):
-    """从 DB 取一条视频，排除已播放路径
+    """从 DB 取一条视频，排除已播放路径（纯 DB 查询，不再同步文件系统）
 
     DOUYIN_RANDOM_MEDIA=True 时使用 ORDER BY RANDOM() 真随机，
     否则按排序顺序遍历。
@@ -51,9 +58,6 @@ def _pick_random_video(exclude_paths):
         is_random = config.DOUYIN_RANDOM_MEDIA
 
         if is_random:
-            from utils.db_utils import init_tables, sync_folder
-            init_tables(conn)
-            sync_folder(conn, str(config.MEDIA_DIR))
             rows = get_random_media(
                 conn, 'video', limit=1,
                 exclude_paths=exclude_paths,
@@ -90,9 +94,17 @@ def _pick_random_video(exclude_paths):
 @login_required
 @require_mode('douyin')
 def douyin_init():
-    """初始化抖音会话，从 DB 随机取第一个视频"""
+    """初始化抖音会话，同步 DB 后取第一个视频"""
     start_time = time.time()
     try:
+        conn = None
+        try:
+            from utils.db_utils import get_db
+            conn = get_db()
+            _ensure_media_synced(conn)
+        except Exception:
+            pass
+
         video = _pick_random_video([])
         if not video:
             return jsonify({'code': 1, 'msg': '没有找到视频文件'})
