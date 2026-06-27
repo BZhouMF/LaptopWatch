@@ -55,7 +55,10 @@ class Config:
     def update_runtime(cls, mode=None, category_browse=None,
                        random_mode=None, douyin_random_media=None,
                        service_active=None, media_dir=None):
-        """线程安全地更新运行时配置，返回 (ok: bool, result: dict)"""
+        """线程安全地更新运行时配置，返回 (ok: bool, result: dict)
+
+        通过 config 实例读写，确保与代码库中其他直接写 config.ATTR 的路径一致。
+        """
         with cls._runtime_lock:
             changed = False
             # 先处理 media_dir：mode 切换校验依赖它
