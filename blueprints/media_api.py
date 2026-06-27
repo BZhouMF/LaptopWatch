@@ -33,6 +33,8 @@ SEND_TIMEOUT = 30  # socket 发送超时秒数，移动端 WiFi 波动较大需�
 
 
 # 随机模式 ID 缓存：{ (seed, media_type): (shuffled_ids, count) }
+# 限制最大条目数，防止每次刷新产生新 seed 导致无限增长
+_MAX_RANDOM_CACHE_ENTRIES = 10
 _random_id_cache = {}
 _random_id_cache_lock = threading.Lock()
 
@@ -85,6 +87,10 @@ def _db_load_more(offset, limit, is_random):
                 rng.shuffle(all_ids)
                 total = len(all_ids)
                 with _random_id_cache_lock:
+                    # 防止缓存无限增长：超出上限时淘汰最旧条目
+                    if len(_random_id_cache) >= _MAX_RANDOM_CACHE_ENTRIES:
+                        oldest_key = next(iter(_random_id_cache))
+                        del _random_id_cache[oldest_key]
                     _random_id_cache[cache_key] = (all_ids, total)
             page_ids = all_ids[offset:offset + limit]
 
