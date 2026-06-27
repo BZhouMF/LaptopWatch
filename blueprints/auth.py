@@ -46,22 +46,18 @@ def _is_api_request():
 
 def _get_stored_password():
     """从 DB 获取密码哈希和盐值，首次自动建表并种子默认密码"""
-    import sqlite3
     from utils.logging_utils import logger
     try:
         if not config.DB_PATH:
             logger.error("_get_stored_password: DB_PATH 为空")
             return None, None
         os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
-        conn = sqlite3.connect(config.DB_PATH)
-        conn.execute("PRAGMA busy_timeout=5000")
-        conn.execute("PRAGMA journal_mode=WAL")
-        from utils.db_utils import init_tables
+        from utils.db_utils import get_db, init_tables
+        conn = get_db()
         init_tables(conn)
         row = conn.execute(
             "SELECT password_hash, salt FROM users WHERE id=1"
         ).fetchone()
-        conn.close()
         if row:
             return row[0], row[1]
         logger.error("_get_stored_password: users 表中无记录")

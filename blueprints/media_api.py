@@ -112,8 +112,6 @@ def _db_load_more(offset, limit, is_random):
                 random_start=False,
                 skip_sync=(offset > 0),
             )
-        conn.close()
-
         return True, {
             'code': 0,
             'data': data,
@@ -136,8 +134,6 @@ def _db_thumbnail(target_path):
         from utils.db_utils import get_db, generate_and_cache_cover
         conn = get_db()
         jpeg_bytes, mime = generate_and_cache_cover(conn, target_path)
-        conn.close()
-
         if jpeg_bytes:
             return True, jpeg_bytes, mime
         return False, None, None

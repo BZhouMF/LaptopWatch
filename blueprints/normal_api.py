@@ -107,9 +107,6 @@ def _list_from_db(requested_path, sort_type, sort_order, offset, limit, item_typ
     except Exception as e:
         logger.debug(f"DB 列表查询失败，回退到文件系统: {e}")
         return False, None
-    finally:
-        if conn:
-            conn.close()
 
 
 @normal_bp.route('/list', methods=['GET'])

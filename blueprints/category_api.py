@@ -28,12 +28,9 @@ def _sync_db(folder_path, conn=None):
     try:
         if config.DB_PATH and config.MEDIA_DIR:
             from utils.db_utils import get_db, sync_folder
-            _own_conn = conn is None
-            if _own_conn:
+            if conn is None:
                 conn = get_db()
             sync_folder(conn, folder_path)
-            if _own_conn:
-                conn.close()
             with _scanned_folders_lock:
                 _scanned_folders.add(folder_path)
     except Exception:
@@ -54,7 +51,6 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
                 sort_order=config.SORT_ORDER,
                 skip_sync=(offset > 0),
             )
-            conn.close()
             return files, has_more
         return [], False
     except Exception:

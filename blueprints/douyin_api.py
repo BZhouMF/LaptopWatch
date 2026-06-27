@@ -59,7 +59,6 @@ def _pick_random_video(exclude_paths):
                 exclude_paths=exclude_paths,
                 media_dir=str(config.MEDIA_DIR),
             )
-            conn.close()
             if not rows:
                 return None
             row = rows[0]
@@ -81,7 +80,6 @@ def _pick_random_video(exclude_paths):
             random_start=False,
             exclude_paths=exclude_paths,
         )
-        conn.close()
         return rows[0] if rows else None
     except Exception as e:
         logger.debug(f"DB 随机取视频失败: {e}")

@@ -39,15 +39,51 @@ except ImportError:
 
 
 def get_db(db_path=None):
-    """创建数据库连接，启用 WAL + Row 工厂"""
+    """获取数据库连接（请求级复用），启用 WAL + Row 工厂
+
+    处于 Flask 请求上下文时，连接缓存在 g.db_conn 上，同一请求内复用；
+    请求结束时由 teardown_request 自动关闭。
+    不处于请求上下文（如 GUI 进程 / 测试独立连接）时回退到独立连接。
+    """
     path = db_path or config.DB_PATH
+
+    # Flask 请求上下文可用 → 复用连接
+    try:
+        from flask import g
+        if hasattr(g, '_db_conn') and g._db_conn is not None:
+            return g._db_conn
+    except (ImportError, RuntimeError):
+        pass
+
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.isolation_level = None
+
+    # 处于 Flask 请求上下文 → 缓存到 g 以便后续复用
+    try:
+        from flask import g
+        g._db_conn = conn
+    except (ImportError, RuntimeError):
+        pass
+
     return conn
+
+
+def close_db_connection(exception=None):
+    """关闭当前请求的 DB 连接（由 Flask teardown_request 调用）"""
+    try:
+        from flask import g
+        conn = g.pop('_db_conn', None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except (ImportError, RuntimeError):
+        pass
 
 
 # ---------------------------------------------------------------------------

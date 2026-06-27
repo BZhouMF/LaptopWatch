@@ -128,6 +128,10 @@ def path_quote_filter(path):
     return quote(path, safe='/')
 
 
+# 请求结束时自动关闭 DB 连接（per-request 复用）
+from utils.db_utils import close_db_connection
+app.teardown_request(close_db_connection)
+
 # 记录视频缩略图后端状态
 log_thumbnail_backend_status()
 
