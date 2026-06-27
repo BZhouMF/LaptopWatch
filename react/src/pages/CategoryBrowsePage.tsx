@@ -461,7 +461,7 @@ export default function CategoryBrowsePage() {
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto p-4">
           {info.categories.map((cat) => (
             <section key={cat.path} className="mb-1">
               <div className="flex items-center justify-between px-4 py-3">
@@ -482,7 +482,7 @@ export default function CategoryBrowsePage() {
                   显示更多
                 </a>
               </div>
-              <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2 px-4">
+              <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2">
                 {cat.files.slice(0, 10).map((file) => (
                   <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
@@ -499,7 +499,7 @@ export default function CategoryBrowsePage() {
                   <span className="ml-1.5 text-xs font-normal text-text-muted">({info.root_files.length})</span>
                 </h2>
               </div>
-              <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2 px-4">
+              <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2">
                 {info.root_files.map((file) => (
                   <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
                 ))}
