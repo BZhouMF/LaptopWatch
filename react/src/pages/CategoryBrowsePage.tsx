@@ -114,6 +114,12 @@ export default function CategoryBrowsePage() {
 
   const current_entry = nav_stack[current_index] || null;
 
+  // Refs to avoid stale closures in callbacks (eliminates cascade rebuilds)
+  const current_index_ref = useRef(current_index);
+  useEffect(() => { current_index_ref.current = current_index; }, [current_index]);
+  const nav_stack_ref = useRef(nav_stack);
+  useEffect(() => { nav_stack_ref.current = nav_stack; }, [nav_stack]);
+
   // Fetch mode config for page size
   useEffect(() => {
     api_client.get<ModeConfig>("/api/mode")
@@ -129,8 +135,9 @@ export default function CategoryBrowsePage() {
 
   const push_entry = useCallback(
     (entry: NavEntry) => {
+      const cur = current_index_ref.current;
       set_nav_stack((prev) => {
-        const next = prev.slice(0, current_index + 1);
+        const next = prev.slice(0, cur + 1);
         next.push(entry);
         if (next.length > MAX_STACK) next.shift();
         const new_index = next.length - 1;
@@ -142,7 +149,7 @@ export default function CategoryBrowsePage() {
         return new_index;
       });
     },
-    [current_index, save_stack]
+    [save_stack]
   );
 
   // ── Initialize ───────────────────────────────────────
@@ -224,7 +231,7 @@ export default function CategoryBrowsePage() {
         }
 
         const entry: CategoryEntry = { view: "category", data: info };
-        const new_index = current_index + 1;
+        const new_index = current_index_ref.current + 1;
         set_nav_stack((prev) => {
           const next = prev.slice(0, new_index);
           next.push(entry);
@@ -235,11 +242,11 @@ export default function CategoryBrowsePage() {
         if (push_history) {
           window.history.pushState({ spaIndex: new_index }, "");
         }
-        save_stack([...nav_stack.slice(0, new_index), entry], new_index);
+        save_stack([...nav_stack_ref.current.slice(0, new_index), entry], new_index);
       } catch { /* ignore */ }
       finally { set_is_loading(false); }
     },
-    [current_index, nav_stack, save_stack]
+    [save_stack, navigate_to_grid_internal]
   );
 
   const navigate_to_grid_internal = useCallback(
@@ -254,7 +261,7 @@ export default function CategoryBrowsePage() {
         page_first: mode_config.page_first,
         page_load: mode_config.page_load,
       };
-      const new_index = current_index + 1;
+      const new_index = current_index_ref.current + 1;
       set_nav_stack((prev) => {
         const next = prev.slice(0, new_index);
         next.push(entry);
@@ -266,7 +273,7 @@ export default function CategoryBrowsePage() {
         window.history.pushState({ spaIndex: new_index }, "");
       }
     },
-    [current_index, mode_config]
+    [mode_config]
   );
 
   const navigate_to_grid = useCallback(
@@ -277,13 +284,14 @@ export default function CategoryBrowsePage() {
   );
 
   const navigate_back = useCallback(() => {
-    if (current_index <= 0) {
+    const cur = current_index_ref.current;
+    if (cur <= 0) {
       navigate("/");
       return;
     }
-    set_current_index(current_index - 1);
-    window.history.replaceState({ spaIndex: current_index - 1 }, "");
-  }, [current_index, navigate]);
+    set_current_index(cur - 1);
+    window.history.replaceState({ spaIndex: cur - 1 }, "");
+  }, [navigate]);
 
   const do_refresh = useCallback(async () => {
     if (!current_entry) return;
@@ -369,10 +377,10 @@ export default function CategoryBrowsePage() {
   const open_media = useCallback(
     (relative_path: string) => {
       sessionStorage.setItem(RETURNING_KEY, "1");
-      save_stack(nav_stack, current_index);
+      save_stack(nav_stack_ref.current, current_index_ref.current);
       window.location.href = `/media/player?path=${encodeURIComponent(relative_path)}`;
     },
-    [nav_stack, current_index, save_stack]
+    [save_stack]
   );
 
   // ── Render helpers ───────────────────────────────────
