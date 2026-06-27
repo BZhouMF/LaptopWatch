@@ -69,6 +69,13 @@ _SERVICE_GATE_WHITELIST = frozenset({
     '/api/drives',
 })
 
+# 跳过门控的高频路径前缀 — 这些路径有自己的 @login_required 鉴权，
+# 无需在 before_request 中重复检查 SERVICE_ACTIVE
+_GATE_SKIP_PREFIXES = (
+    '/static/', '/favicon.ico',
+    '/media/thumbnail/', '/media/serve_media/', '/media/navigate',
+)
+
 
 @app.before_request
 def gate_service_active():
@@ -76,6 +83,10 @@ def gate_service_active():
     from flask import request as _req
 
     path = _req.path
+
+    # 高频路径 / 自带鉴权路径 → 直接放行，减少无效检查
+    if path.startswith(_GATE_SKIP_PREFIXES):
+        return None
 
     # 白名单路径始终放行
     if path.rstrip('/') in _SERVICE_GATE_WHITELIST or path.startswith('/api/check_path'):
