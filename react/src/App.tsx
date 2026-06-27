@@ -25,7 +25,7 @@ export default function App() {
       } catch {
         // 503 or network error — service not active yet, silently wait
       }
-    }, 3000);
+    }, 15000);
 
     return () => clearInterval(interval);
   }, []);
