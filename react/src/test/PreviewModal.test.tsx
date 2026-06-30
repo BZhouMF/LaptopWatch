@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import PreviewModal from "../components/browse/PreviewModal";
 
@@ -10,6 +10,10 @@ describe("PreviewModal", () => {
     download_url: "/file/view/test.jpg",
     on_close: vi.fn(),
   };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("renders image for non-video", () => {
     render(<PreviewModal {...default_props} />);
@@ -25,20 +29,27 @@ describe("PreviewModal", () => {
   });
 
   it("calls on_close when close button clicked", () => {
+    vi.useFakeTimers();
     const on_close = vi.fn();
     render(<PreviewModal {...default_props} on_close={on_close} />);
     fireEvent.click(screen.getByLabelText("关闭"));
+    vi.advanceTimersByTime(200);
     expect(on_close).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("calls on_close on Escape key", () => {
+    vi.useFakeTimers();
     const on_close = vi.fn();
     render(<PreviewModal {...default_props} on_close={on_close} />);
     fireEvent.keyDown(document, { key: "Escape" });
+    vi.advanceTimersByTime(200);
     expect(on_close).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("calls on_close on backdrop click", () => {
+    vi.useFakeTimers();
     const on_close = vi.fn();
     const { container } = render(
       <PreviewModal {...default_props} on_close={on_close} />
@@ -48,7 +59,9 @@ describe("PreviewModal", () => {
     if (backdrop) {
       fireEvent.click(backdrop);
     }
+    vi.advanceTimersByTime(200);
     expect(on_close).toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("renders download link", () => {

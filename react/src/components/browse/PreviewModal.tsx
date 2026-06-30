@@ -1,4 +1,4 @@
-import { useEffect, useCallback, type MouseEvent } from "react";
+import { useState, useEffect, useCallback, type MouseEvent } from "react";
 
 interface PreviewModalProps {
   url: string;
@@ -15,11 +15,19 @@ export default function PreviewModal({
   download_url,
   on_close,
 }: PreviewModalProps) {
+  const [is_closing, set_is_closing] = useState(false);
+
+  const handle_close = useCallback(() => {
+    if (is_closing) return;
+    set_is_closing(true);
+    setTimeout(() => on_close(), 200);
+  }, [is_closing, on_close]);
+
   const handle_keydown = useCallback(
     (event: KeyboardEvent) => {
-      if (event.key === "Escape") on_close();
+      if (event.key === "Escape") handle_close();
     },
-    [on_close]
+    [handle_close]
   );
 
   useEffect(() => {
@@ -32,17 +40,19 @@ export default function PreviewModal({
   }, [handle_keydown]);
 
   const handle_backdrop_click = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget) on_close();
+    if (event.target === event.currentTarget) handle_close();
   };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm animate-fade-in"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm ${
+        is_closing ? "animate-fade-out" : "animate-fade-in"
+      }`}
       onClick={handle_backdrop_click}
     >
       {/* Close button */}
       <button
-        onClick={on_close}
+        onClick={handle_close}
         className="absolute right-4 top-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white/80 transition hover:bg-white/20 hover:text-white hover:scale-105"
         aria-label="关闭"
       >
