@@ -208,6 +208,33 @@ export default function CategoryBrowsePage() {
 
   // ── Navigation ───────────────────────────────────────
 
+  const navigate_to_grid_internal = useCallback(
+    (folder_path: string, folder_name: string, parent_path: string, push_history: boolean) => {
+      const entry: GridEntry = {
+        view: "grid",
+        folder_path,
+        folder_name,
+        parent_path,
+        current_page: 1,
+        page_cache: {},
+        page_first: mode_config.page_first,
+        page_load: mode_config.page_load,
+      };
+      const new_index = current_index_ref.current + 1;
+      set_nav_stack((prev) => {
+        const next = prev.slice(0, new_index);
+        next.push(entry);
+        if (next.length > MAX_STACK) next.shift();
+        return next;
+      });
+      set_current_index(new_index);
+      if (push_history) {
+        window.history.pushState({ spaIndex: new_index }, "");
+      }
+    },
+    [mode_config]
+  );
+
   const navigate_to_category = useCallback(
     async (folder_path: string, push_history: boolean) => {
       set_is_loading(true);
@@ -247,33 +274,6 @@ export default function CategoryBrowsePage() {
       finally { set_is_loading(false); }
     },
     [save_stack, navigate_to_grid_internal]
-  );
-
-  const navigate_to_grid_internal = useCallback(
-    (folder_path: string, folder_name: string, parent_path: string, push_history: boolean) => {
-      const entry: GridEntry = {
-        view: "grid",
-        folder_path,
-        folder_name,
-        parent_path,
-        current_page: 1,
-        page_cache: {},
-        page_first: mode_config.page_first,
-        page_load: mode_config.page_load,
-      };
-      const new_index = current_index_ref.current + 1;
-      set_nav_stack((prev) => {
-        const next = prev.slice(0, new_index);
-        next.push(entry);
-        if (next.length > MAX_STACK) next.shift();
-        return next;
-      });
-      set_current_index(new_index);
-      if (push_history) {
-        window.history.pushState({ spaIndex: new_index }, "");
-      }
-    },
-    [mode_config]
   );
 
   const navigate_to_grid = useCallback(
@@ -378,7 +378,7 @@ export default function CategoryBrowsePage() {
     (relative_path: string) => {
       sessionStorage.setItem(RETURNING_KEY, "1");
       save_stack(nav_stack_ref.current, current_index_ref.current);
-      window.location.href = `/media/player?path=${encodeURIComponent(relative_path)}`;
+      navigate(`/media/player?path=${encodeURIComponent(relative_path)}`);
     },
     [save_stack]
   );

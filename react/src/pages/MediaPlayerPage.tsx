@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type JSX } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import api_client from "../api/client";
 import { usePlayerGestures, type GestureCallbacks } from "../hooks/usePlayerGestures";
 
@@ -32,6 +32,7 @@ function format_time(seconds: number): string {
 
 export default function MediaPlayerPage(): JSX.Element {
   const [search_params] = useSearchParams();
+  const navigate = useNavigate();
 
   // ── Mode ──────────────────────────────────────────
   // Grid mode: a specific file path was provided via ?path= (from BrowsePage / CategoryBrowsePage)
@@ -922,7 +923,7 @@ export default function MediaPlayerPage(): JSX.Element {
             <button
               onClick={() => {
                 if (document.fullscreenElement) toggle_fullscreen();
-                else window.history.back();
+                else navigate(-1);
               }}
               className="rounded-lg px-3 py-1.5 text-sm font-medium text-white/80 transition hover:text-white hover:bg-white/10"
             >
