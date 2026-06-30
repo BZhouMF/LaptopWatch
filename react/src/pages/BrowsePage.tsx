@@ -244,28 +244,20 @@ export default function BrowsePage() {
     navigate(`/browse/${encodeURIComponent(path)}`);
   }, [navigate]);
 
-  const handle_go_back = useCallback(async () => {
+  const handle_go_back = useCallback(() => {
     const history: string[] = JSON.parse(localStorage.getItem("fileHistory") || "[]");
     // Remove current path
     history.pop();
+    // Get previous path
+    const previous = history.pop();
     localStorage.setItem("fileHistory", JSON.stringify(history));
 
-    while (history.length > 0) {
-      const candidate = history.pop()!;
-      try {
-        const resp = await api_client.get<{ exists: boolean; is_dir: boolean }>("/api/check_path", {
-          params: { path: candidate },
-        });
-        if (resp.data.exists && resp.data.is_dir) {
-          // Persist trimmed history before navigating so the effect won't push duplicates
-          localStorage.setItem("fileHistory", JSON.stringify(history));
-          navigate(`/browse/${encodeURIComponent(candidate)}`);
-          return;
-        }
-      } catch { /* try next */ }
+    if (previous) {
+      navigate(`/browse/${encodeURIComponent(previous)}`);
+    } else {
+      localStorage.removeItem("fileHistory");
+      navigate("/");
     }
-    localStorage.removeItem("fileHistory");
-    navigate("/");
   }, [navigate]);
 
   const handle_go_home = useCallback(() => navigate("/"), [navigate]);
