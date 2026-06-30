@@ -20,6 +20,13 @@ export default function App() {
         }
 
         if (version !== versionRef.current) {
+          // Don't interrupt video playback — defer the reload
+          const active_video = document.querySelector("video");
+          if (active_video && !active_video.paused) {
+            // Video is playing; accept the new version but defer navigation
+            versionRef.current = version;
+            return;
+          }
           window.location.href = "/";
         }
       } catch {
