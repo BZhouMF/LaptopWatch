@@ -93,13 +93,15 @@ export default function HomePage() {
     );
   }
 
-  // Media modes: video, image, or douyin
-  if (["video", "image", "douyin"].includes(mode_config.run_mode)) {
+  // 抖音模式 — 始终渲染全屏播放器，不受 category_browse 影响
+  if (mode_config.run_mode === "douyin") {
+    return <MediaPlayerPage />;
+  }
+
+  // 视频 / 图片模式
+  if (["video", "image"].includes(mode_config.run_mode)) {
     if (mode_config.category_browse) {
       return <CategoryBrowsePage />;
-    }
-    if (mode_config.run_mode === "douyin") {
-      return <MediaPlayerPage />;
     }
     const mode_label = mode_config.run_mode === "video" ? "视频模式" : "图片模式";
     return (

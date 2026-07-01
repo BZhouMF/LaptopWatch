@@ -11,8 +11,6 @@ import sys
 import os
 import time
 import atexit
-import http.server
-import socketserver
 import threading
 import argparse
 import subprocess
@@ -124,21 +122,22 @@ def _post_json(req, timeout=5):
         except Exception:
             return {'code': 1, 'msg': f'HTTP {exc.code}: {exc.reason}'}
 
-# ── 安全静态文件 Handler ──
-def _make_safe_handler(root_dir):
-    """返回一个仅允许 /templates/ 和 /static/ 路径的 HTTP handler"""
-    class _SafeHandler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *_args, **kw):
-            super().__init__(*_args, directory=root_dir, **kw)
 
-        def do_GET(self):
-            path = self.path.split('?')[0].split('#')[0]
-            if path.startswith('/templates/') or path.startswith('/static/'):
-                super().do_GET()
-            else:
-                self.send_error(404)
-
-    return _SafeHandler
+def _build_inline_html():
+    """构建内联 HTML — 将 setup.html、setup.css、setup.js 合并为单个字符串"""
+    project_root = Path(__file__).parent
+    html = (project_root / 'templates' / 'setup.html').read_text(encoding='utf-8')
+    css = (project_root / 'static' / 'css' / 'setup.css').read_text(encoding='utf-8')
+    js = (project_root / 'static' / 'js' / 'setup.js').read_text(encoding='utf-8')
+    html = html.replace(
+        '<link rel="stylesheet" href="/static/css/setup.css">',
+        '<style>' + css + '</style>'
+    )
+    html = html.replace(
+        '<script src="/static/js/setup.js"></script>',
+        '<script>' + js + '</script>'
+    )
+    return html
 
 
 # ── 后台：日志推送到 QID ──
@@ -816,16 +815,9 @@ def main():
     # 启动端口服务监控（外部服务检测 + QID 日志同步）
     _start_service_monitor()
 
-    # 安全静态文件服务器：仅暴露 templates/ 和 static/ 目录
-    project_root = str(Path(__file__).parent)
-    safe_handler = _make_safe_handler(project_root)
-    httpd = socketserver.TCPServer(('127.0.0.1', 0), safe_handler)
-    static_port = httpd.server_address[1]
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-
     webview.create_window(
         title='LaptopWatch',
-        url=f'http://127.0.0.1:{static_port}/templates/setup.html',
+        html=_build_inline_html(),
         js_api=_DesktopApi(),
         width=900,
         height=700,

@@ -94,6 +94,10 @@ class Config:
                 if config.SERVICE_ACTIVE != val:
                     config.SERVICE_ACTIVE = val
                     changed = True
+            # 抖音模式不支持按目录浏览，强制关闭
+            if config.RUN_MODE == 'douyin' and config.CATEGORY_BROWSE:
+                config.CATEGORY_BROWSE = False
+                changed = True
             if changed:
                 config.CONFIG_VERSION += 1
             return True, {

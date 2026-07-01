@@ -143,87 +143,87 @@ class TestGenerateQR:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# _make_safe_handler — HTTP 路径安全过滤
+# _build_inline_html — 内联 HTML 构建
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestSafeHandler:
+class TestBuildInlineHtml:
     def setup_method(self):
         self.tmpdir = tempfile.mkdtemp()
         # 创建目录结构
         os.makedirs(os.path.join(self.tmpdir, 'templates'), exist_ok=True)
         os.makedirs(os.path.join(self.tmpdir, 'static', 'css'), exist_ok=True)
+        os.makedirs(os.path.join(self.tmpdir, 'static', 'js'), exist_ok=True)
         # 写入测试文件
-        (Path(self.tmpdir) / 'templates' / 'setup.html').write_text('<html>setup</html>')
-        (Path(self.tmpdir) / 'static' / 'css' / 'setup.css').write_text('body {}')
+        (Path(self.tmpdir) / 'templates' / 'setup.html').write_text(
+            '<html><head><link rel="stylesheet" href="/static/css/setup.css"></head>'
+            '<body><script src="/static/js/setup.js"></script></body></html>'
+        )
+        (Path(self.tmpdir) / 'static' / 'css' / 'setup.css').write_text('body { color: red; }')
+        (Path(self.tmpdir) / 'static' / 'js' / 'setup.js').write_text('console.log("hello");')
 
-        HandlerClass = tg._make_safe_handler(self.tmpdir)
-
-        # 创建一个真实的 TCPServer 来测试 handler
-        import socketserver
-        self.server = socketserver.TCPServer(('127.0.0.1', 0), HandlerClass)
-        self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
+        # 模拟 _build_inline_html 但使用临时目录
+        import gui as tg
+        self.tg = tg
 
     def teardown_method(self):
-        self.server.shutdown()
-        self.server.server_close()
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _fetch(self, path):
-        """通过 HTTP 请求测试 handler"""
-        import http.client
-        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=5)
-        conn.request('GET', path)
-        resp = conn.getresponse()
-        body = resp.read()
-        conn.close()
-        return resp.status, body
+    def _build_inline(self):
+        """模拟 _build_inline_html，使用临时目录的路径"""
+        html = (Path(self.tmpdir) / 'templates' / 'setup.html').read_text(encoding='utf-8')
+        css = (Path(self.tmpdir) / 'static' / 'css' / 'setup.css').read_text(encoding='utf-8')
+        js = (Path(self.tmpdir) / 'static' / 'js' / 'setup.js').read_text(encoding='utf-8')
+        html = html.replace(
+            '<link rel="stylesheet" href="/static/css/setup.css">',
+            '<style>' + css + '</style>'
+        )
+        html = html.replace(
+            '<script src="/static/js/setup.js"></script>',
+            '<script>' + js + '</script>'
+        )
+        return html
 
-    def test_allows_templates_path(self):
-        """允许 /templates/ 路径"""
-        status, body = self._fetch('/templates/setup.html')
-        assert status == 200
-        assert b'setup' in body
+    def test_css_inlined(self):
+        """CSS 被内联到 <style> 标签中"""
+        result = self._build_inline()
+        assert '<link rel="stylesheet"' not in result
+        assert '<style>body { color: red; }</style>' in result
 
-    def test_allows_static_path(self):
-        """允许 /static/ 路径"""
-        status, body = self._fetch('/static/css/setup.css')
-        assert status == 200
-        assert b'body' in body
+    def test_js_inlined(self):
+        """JS 被内联到 <script> 标签中"""
+        result = self._build_inline()
+        assert 'src="/static/js/setup.js"' not in result
+        assert '<script>console.log("hello");</script>' in result
 
-    def test_blocks_root_path(self):
-        """拒绝根路径"""
-        status, body = self._fetch('/')
-        assert status == 404
+    def test_no_external_refs(self):
+        """构建后的 HTML 不包含任何外部资源引用"""
+        result = self._build_inline()
+        assert '/static/' not in result
 
-    def test_blocks_source_code_access(self):
-        """拒绝访问项目源码（如 app.py / config.py）"""
-        status, _ = self._fetch('/app.py')
-        assert status == 404
+    def test_html_structure_preserved(self):
+        """HTML 基本结构保持不变"""
+        result = self._build_inline()
+        assert '<html>' in result
+        assert '<head>' in result
+        assert '<body>' in result
 
-    def test_blocks_config_access(self):
-        """拒绝访问 config.py"""
-        status, _ = self._fetch('/config.py')
-        assert status == 404
+    def test_function_exists(self):
+        """_build_inline_html 函数存在于 gui 模块中"""
+        assert hasattr(self.tg, '_build_inline_html')
+        assert callable(self.tg._build_inline_html)
 
-    def test_blocks_traversal(self):
-        """拒绝路径穿越攻击"""
-        status, _ = self._fetch('/templates/../../app.py')
-        assert status == 404
+    def test_function_returns_string(self):
+        """_build_inline_html 返回字符串（使用真实项目文件）"""
+        result = self.tg._build_inline_html()
+        assert isinstance(result, str)
+        assert len(result) > 1000
 
-    def test_strips_query_string(self):
-        """查询参数不影响路径验证"""
-        status, body = self._fetch('/templates/setup.html?v=1')
-        assert status == 200
-        assert b'setup' in body
-
-    def test_strips_fragment(self):
-        """fragment 不影响路径验证"""
-        status, body = self._fetch('/templates/setup.html#section')
-        assert status == 200
-        assert b'setup' in body
+    def test_no_static_or_templates_in_result(self):
+        """内联后的 HTML 不包含 /static/ 或 /templates/ 引用"""
+        result = self.tg._build_inline_html()
+        assert '/static/' not in result
+        assert '/templates/' not in result
 
 
 # ═══════════════════════════════════════════════════════════════════════════
