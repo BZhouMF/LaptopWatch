@@ -1,10 +1,11 @@
 """
-全量测试执行器 — 运行前后端全部测试
+全量测试执行器 — 运行前后端全部测试并输出覆盖率报告
 用法: python test/run_all.py [选项]
 
 选项:
     --backend-only   仅运行 Python 后端测试
     --frontend-only  仅运行 React 前端测试
+    --no-coverage    跳过覆盖率检测
     -v, --verbose    详细输出
 """
 import subprocess
@@ -14,6 +15,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 REACT_DIR = ROOT / 'react'
+
+
+def run_coverage():
+    """运行覆盖率检测脚本。"""
+    start = time.time()
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "test" / "check_coverage.py")],
+        cwd=str(ROOT),
+    )
+    elapsed = time.time() - start
+    return result.returncode, elapsed
 
 
 def run_backend(verbose=False):
@@ -54,6 +66,7 @@ def run_frontend(verbose=False):
 def main():
     backend_only = '--backend-only' in sys.argv
     frontend_only = '--frontend-only' in sys.argv
+    no_coverage = '--no-coverage' in sys.argv
     verbose = '-v' in sys.argv or '--verbose' in sys.argv
 
     run_all = not backend_only and not frontend_only
@@ -94,6 +107,11 @@ def main():
         print(f'  {failed}/{len(codes)} 套测试失败  ({total_elapsed:.1f}s)')
 
     print('=' * 52)
+
+    # 覆盖率检测
+    if not no_coverage and failed == 0:
+        cov_code, cov_elapsed = run_coverage()
+
     sys.exit(1 if failed > 0 else 0)
 
 

@@ -38,9 +38,13 @@ describe("api_client", () => {
     expect(interceptor_use).toHaveBeenCalled();
   });
 
-  it("redirects to /login on 401 outside /login page", async () => {
-    // jsdom doesn't implement navigation, mock window.location before the interceptor runs
-    const location_mock = { href: "", pathname: "/" };
+  it("redirects to /login via replace on 401 outside /login page", async () => {
+    const location_replace = vi.fn();
+    const location_mock = {
+      href: "",
+      pathname: "/",
+      replace: location_replace,
+    };
     Object.defineProperty(window, "location", {
       value: location_mock,
       writable: true,
@@ -64,6 +68,74 @@ describe("api_client", () => {
 
     error_handler(fake_error)?.catch(() => {});
 
-    expect(location_mock.href).toBe("/login?redirect=%2F");
+    expect(location_replace).toHaveBeenCalledWith("/login?redirect=%2F");
+  });
+
+  it("does not redirect to /login when already on /login page", async () => {
+    const location_replace = vi.fn();
+    const location_mock = {
+      href: "",
+      pathname: "/login",
+      replace: location_replace,
+    };
+    Object.defineProperty(window, "location", {
+      value: location_mock,
+      writable: true,
+      configurable: true,
+    });
+
+    const interceptor_use = vi.fn();
+    mock_axios.create.mockReturnValue({
+      interceptors: { response: { use: interceptor_use } },
+    });
+
+    vi.resetModules();
+    await import("../api/client");
+
+    const error_handler = interceptor_use.mock.calls[0]?.[1];
+    expect(error_handler).toBeDefined();
+
+    const fake_error = {
+      response: { status: 401 },
+    };
+
+    error_handler(fake_error)?.catch(() => {});
+
+    expect(location_replace).not.toHaveBeenCalled();
+  });
+
+  it("does not redirect on 503 status", async () => {
+    const location_replace = vi.fn();
+    const location_mock = {
+      href: "",
+      pathname: "/",
+      replace: location_replace,
+    };
+    Object.defineProperty(window, "location", {
+      value: location_mock,
+      writable: true,
+      configurable: true,
+    });
+
+    const interceptor_use = vi.fn();
+    mock_axios.create.mockReturnValue({
+      interceptors: { response: { use: interceptor_use } },
+    });
+
+    vi.resetModules();
+    await import("../api/client");
+
+    const error_handler = interceptor_use.mock.calls[0]?.[1];
+    expect(error_handler).toBeDefined();
+
+    const fake_error = {
+      response: { status: 503 },
+    };
+
+    const result = error_handler(fake_error);
+    expect(result).toBeInstanceOf(Promise);
+    // 503 returns Promise.reject — catch it to avoid unhandled rejection
+    result.catch(() => {});
+    expect(location_replace).not.toHaveBeenCalled();
   });
 });

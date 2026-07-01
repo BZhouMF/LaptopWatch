@@ -15,7 +15,7 @@ api_client.interceptors.response.use(
     if (error.response?.status === 401) {
       const current_path = window.location.pathname;
       if (current_path !== "/login") {
-        window.location.href = `/login?redirect=${encodeURIComponent(current_path)}`;
+        window.location.replace(`/login?redirect=${encodeURIComponent(current_path)}`);
       }
     }
     return Promise.reject(error);
