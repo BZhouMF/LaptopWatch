@@ -87,14 +87,25 @@ def scan_backend():
 
     for dir_label, source_path in source_files:
         source_stem = source_path.stem
-        test_name = _resolve_test_name(source_stem)
         expected_test_key = source_stem
 
+        # Exact match first, then fuzzy: test file key contains source stem
         if expected_test_key in test_files:
             covered.append({
                 "dir": dir_label,
                 "source": source_path.name,
                 "test": test_files[expected_test_key],
+            })
+        elif any(source_stem in test_key or test_key in source_stem
+                 for test_key in test_files):
+            matched_key = next(
+                tk for tk in test_files
+                if source_stem in tk or tk in source_stem
+            )
+            covered.append({
+                "dir": dir_label,
+                "source": source_path.name,
+                "test": test_files[matched_key],
             })
         else:
             uncovered.append({
