@@ -60,6 +60,7 @@ function render_page(path: string) {
 
 describe("TextViewerPage", () => {
   beforeEach(() => {
+    _mock_filepath = "";
     _mock_text = "default text";
     _mock_should_fail = false;
     _mock_never_resolve = false;
@@ -82,13 +83,15 @@ describe("TextViewerPage", () => {
     });
   });
 
-  it("shows spinner when filepath is empty", () => {
+  it("shows error message when filepath is empty", async () => {
     render(
       <MemoryRouter initialEntries={["/file/text/"]}>
         <TextViewerPage />
       </MemoryRouter>
     );
-    expect(document.querySelector(".animate-spin")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("未指定文件路径")).toBeDefined();
+    });
   });
 
   it("renders text content with line numbers on success", async () => {

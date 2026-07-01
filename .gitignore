@@ -34,3 +34,6 @@ Thumbs.db
 # App generated
 db_path/
 .ffmpeg/
+react/coverage/
+.coverage*
+coverage_py.json

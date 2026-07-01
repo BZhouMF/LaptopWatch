@@ -18,7 +18,11 @@ export default function TextViewerPage() {
   const [is_copied, set_is_copied] = useState(false);
 
   useEffect(() => {
-    if (!filepath) return;
+    if (!filepath) {
+      set_is_loading(false);
+      set_error("未指定文件路径");
+      return;
+    }
     let cancelled = false;
 
     api_client
