@@ -18,10 +18,19 @@ category_bp = Blueprint('category', __name__, url_prefix='/category')
 
 _scanned_folders = set()  # 已同步过的文件夹，点击刷新可清除
 _scanned_folders_lock = threading.Lock()
+_last_config_version = config.CONFIG_VERSION
 
 
 def _sync_db(folder_path, conn=None):
     """同步当前文件夹到 DB，同目录只扫描一次。可传入共享连接避免重复开/关。"""
+    global _last_config_version
+    # 配置变更（模式切换、媒体目录变更等）→ 清除节流阀，强制重新扫描
+    if config.CONFIG_VERSION != _last_config_version:
+        with _scanned_folders_lock:
+            _scanned_folders.clear()
+        invalidate_cache()
+        _last_config_version = config.CONFIG_VERSION
+
     with _scanned_folders_lock:
         if folder_path in _scanned_folders:
             return
@@ -66,6 +75,14 @@ def category_data():
     JSON API: 获取某路径下的分类结构数据。
     Query params: path=相对路径（空=根目录）, refresh=1 清除缓存
     """
+    global _last_config_version
+    # 配置变更（模式切换、媒体目录变更等）→ 清除节流阀与缓存
+    if config.CONFIG_VERSION != _last_config_version:
+        with _scanned_folders_lock:
+            _scanned_folders.clear()
+        invalidate_cache()
+        _last_config_version = config.CONFIG_VERSION
+
     start_time = time.time()
     try:
         folder_rel_path = request.args.get('path', '')

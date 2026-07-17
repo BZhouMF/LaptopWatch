@@ -102,6 +102,7 @@ def _format_db_row(r):
 _would_redirect_cache: dict[str, bool] = {}
 _category_info_cache: dict[str, dict] = {}
 _cache_lock = threading.Lock()
+_cache_config_version = config.CONFIG_VERSION
 
 
 def invalidate_cache(clear_key: str | None = None):
@@ -193,6 +194,14 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
         folder_rel_path = ''
     else:
         folder_rel_path = os.path.relpath(rel_base, media_dir_str).replace('\\', '/')
+
+    # 配置变更（模式切换、媒体目录变更等）→ 清除所有缓存
+    global _cache_config_version
+    if config.CONFIG_VERSION != _cache_config_version:
+        with _cache_lock:
+            _category_info_cache.clear()
+            _would_redirect_cache.clear()
+        _cache_config_version = config.CONFIG_VERSION
 
     # 检查缓存（非 refresh 路径，already_synced 为 set 说明不会重新 sync）
     cache_key = f"{rel_base}:{run_mode}:{random_mode}:{limit}"
