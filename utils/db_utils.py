@@ -280,6 +280,7 @@ def _upsert_media(conn, parent_id, entry, mtime, is_dir):
     """将一条文件系统条目写入 media 表（若为媒体文件），返回是否写入
 
     扩展名不再属于媒体类型时，清理可能存在的过期 media 记录。
+    使用 UPSERT 语法（ON CONFLICT）避免并发 INSERT 的 UNIQUE 约束冲突。
     """
     if is_dir:
         return False
@@ -290,24 +291,19 @@ def _upsert_media(conn, parent_id, entry, mtime, is_dir):
         return False
 
     entry_path = entry.path
-    existing = conn.execute(
-        "SELECT id FROM media WHERE path=?", (entry_path,)
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE media SET parent_id=?, name=?, modify_time=? WHERE id=?",
-            (parent_id, entry.name, mtime, existing[0]),
-        )
-    else:
-        # 图片文件预生成封面，消除首次访问的实时生成延迟
-        cover_blob = None
-        if media_type == 'image':
-            cover_blob = _generate_image_cover(entry_path)
-        conn.execute(
-            "INSERT INTO media (parent_id, name, media_type, path, modify_time, cover) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (parent_id, entry.name, media_type, entry_path, mtime, cover_blob),
-        )
+    # 图片文件预生成封面，消除首次访问的实时生成延迟
+    cover_blob = None
+    if media_type == 'image':
+        cover_blob = _generate_image_cover(entry_path)
+    conn.execute(
+        "INSERT INTO media (parent_id, name, media_type, path, modify_time, cover) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET "
+        "  parent_id=excluded.parent_id, name=excluded.name, "
+        "  media_type=excluded.media_type, modify_time=excluded.modify_time, "
+        "  cover=COALESCE(excluded.cover, media.cover)",
+        (parent_id, entry.name, media_type, entry_path, mtime, cover_blob),
+    )
     return True
 
 

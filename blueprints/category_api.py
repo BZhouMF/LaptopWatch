@@ -31,19 +31,22 @@ def _sync_db(folder_path, conn=None):
         invalidate_cache()
         _last_config_version = config.CONFIG_VERSION
 
+    # 在锁内同时完成检查与标记，避免并发线程同时通过检查
     with _scanned_folders_lock:
         if folder_path in _scanned_folders:
             return
+        _scanned_folders.add(folder_path)
+
     try:
         if config.DB_PATH and config.MEDIA_DIR:
             from utils.db_utils import get_db, sync_folder
             if conn is None:
                 conn = get_db()
             sync_folder(conn, folder_path)
-            with _scanned_folders_lock:
-                _scanned_folders.add(folder_path)
     except Exception:
-        pass
+        # 同步失败时移除标记，允许下次请求重试
+        with _scanned_folders_lock:
+            _scanned_folders.discard(folder_path)
 
 
 def _get_lazy_page_files(folder_path, offset, limit, run_mode):

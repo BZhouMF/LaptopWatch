@@ -271,18 +271,25 @@ def _stream_video_file(filepath, range_header, mimetype, environ):
 
     def generate():
         remaining = content_length
-        with open(filepath, 'rb') as fh:
-            fh.seek(start)
-            while remaining > 0:
-                chunk_size = min(VIDEO_CHUNK, remaining)
-                data = fh.read(chunk_size)
-                if not data:
-                    break
-                remaining -= len(data)
-                try:
-                    yield data
-                except (socket.timeout, TimeoutError, OSError):
-                    break
+        try:
+            with open(filepath, 'rb') as fh:
+                fh.seek(start)
+                while remaining > 0:
+                    chunk_size = min(VIDEO_CHUNK, remaining)
+                    data = fh.read(chunk_size)
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    try:
+                        yield data
+                    except GeneratorExit:
+                        # Waitress 检测到客户端断开时向生成器注入 GeneratorExit
+                        return
+                    except (socket.timeout, TimeoutError, OSError):
+                        break
+        except GeneratorExit:
+            # 最外层兜底，确保文件句柄通过 with 上下文管理正确关闭
+            return
 
     headers = {
         'Accept-Ranges': 'bytes',
