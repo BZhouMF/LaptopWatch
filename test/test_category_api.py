@@ -123,6 +123,21 @@ class TestCategoryData:
         names = [f['name'] for f in info['root_files']]
         assert 'root_video.mp4' in names
 
+    def test_root_files_not_capped_when_folder_has_subfolders(self, client, temp_dir):
+        """文件夹同时含视频+子文件夹时，root_files 应全部返回，不受 CATEGORY_PAGE_SIZE 限制"""
+        # 创建超过 CATEGORY_PAGE_SIZE(=6) 的直接视频 + 一个子文件夹
+        for i in range(10):
+            _create_file(os.path.join(temp_dir, f'root_video_{i}.mp4'))
+        self._seed_subfolders(temp_dir)
+
+        resp = client.get('/category/data')
+        info = resp.get_json()['data']
+
+        assert info['is_leaf'] is False
+        assert len(info['root_files']) == 10
+        names = [f['name'] for f in info['root_files']]
+        assert all(f'root_video_{i}.mp4' in names for i in range(10))
+
     def test_empty_folder(self, client, temp_dir):
         """空文件夹返回空分类"""
         resp = client.get('/category/data')

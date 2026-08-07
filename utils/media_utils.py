@@ -234,10 +234,10 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
         }
         node = get_node_by_path(shared_conn, str(folder_path))
         if node:
+            # 根目录文件不设上限，全部展示（limit 仅用于子文件夹预览块）
             rows, _ = get_direct_media(
                 shared_conn, node['id'], media_type,
-                config.SORT_TYPE, config.SORT_ORDER,
-                limit=limit)
+                config.SORT_TYPE, config.SORT_ORDER)
             result['root_files'] = [_format_db_row(r) for r in rows]
     except Exception:
         logger.debug(f"get_category_children_info: 根文件查询失败")
