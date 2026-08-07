@@ -522,12 +522,14 @@ export default function MediaPlayerPage(): JSX.Element {
         const data = resp.data.data;
         grid_path_ref.current = data.relative_path;
         grid_is_video_ref.current = data.is_video;
+        set_current_media(data);
         if (data.is_video) {
           set_show_video(true);
-          play_media(data, direction);
+          set_status("loading");
+          const url = `/media/serve_media/${encodeURIComponent(data.relative_path)}`;
+          load_grid_video(url);
         } else {
           set_show_video(false);
-          set_current_media(data);
           set_status("playing");
         }
       } else if (resp.data.code === 2) {
@@ -543,7 +545,18 @@ export default function MediaPlayerPage(): JSX.Element {
       is_fetching_ref.current = false;
       if (status === "loading") set_status("playing");
     }
-  }, [play_media, status]);
+  }, [load_grid_video, status]);
+
+  // ── Grid mode: simple video load (single element, no dual-buffer) ──
+  const load_grid_video = useCallback((url: string) => {
+    const video = video_a_ref.current;
+    if (!video) return;
+    video.src = url;
+    video.muted = is_muted;
+    video.playbackRate = selected_speed;
+    video.play().catch(() => {});
+    set_video_a_src(url);
+  }, [is_muted, selected_speed]);
 
   // ── Preload next (douyin mode) ──────────────────────
   const preload_next = useCallback(async () => {
@@ -654,7 +667,8 @@ export default function MediaPlayerPage(): JSX.Element {
       };
       set_current_media(media);
       if (is_vid) {
-        play_media(media, null);
+        const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
+        load_grid_video(url);
       } else {
         set_status("playing");
       }
@@ -798,7 +812,7 @@ export default function MediaPlayerPage(): JSX.Element {
     const handler = (event: KeyboardEvent) => {
       if (event.key === "ArrowUp" || event.key === "ArrowLeft") { event.preventDefault(); handle_nav_prev(); }
       else if (event.key === "ArrowDown" || event.key === "ArrowRight") { event.preventDefault(); handle_nav_next(); }
-      else if (event.key === " ") { event.preventDefault(); toggle_play(); }
+      else if (!is_grid && event.key === " ") { event.preventDefault(); toggle_play(); }
       else if (event.key === "f" || event.key === "F") toggle_fullscreen();
       else if (event.key === "m" || event.key === "M") toggle_mute();
     };
@@ -866,16 +880,29 @@ export default function MediaPlayerPage(): JSX.Element {
     <div
       ref={container_ref}
       className="relative h-dvh w-screen overflow-hidden bg-black select-none touch-none"
-      onTouchStart={gesture.handle_touch_start}
-      onTouchMove={gesture.handle_touch_move}
-      onTouchEnd={gesture.handle_touch_end}
-      onClick={gesture.handle_click}
-      onMouseDown={gesture.handle_mouse_down}
-      onMouseUp={gesture.handle_mouse_up}
-      onWheel={gesture.handle_wheel}
+      {...(!is_grid ? {
+        onTouchStart: gesture.handle_touch_start,
+        onTouchMove: gesture.handle_touch_move,
+        onTouchEnd: gesture.handle_touch_end,
+        onClick: gesture.handle_click,
+        onMouseDown: gesture.handle_mouse_down,
+        onMouseUp: gesture.handle_mouse_up,
+        onWheel: gesture.handle_wheel,
+      } : {
+        onClick: () => set_controls_visible((prev) => !prev),
+      })}
     >
       {/* ─── Video / Image Display ─────────────────── */}
-      {show_video ? (
+      {is_grid && show_video ? (
+        <video
+          ref={video_a_ref}
+          src={video_a_src}
+          controls
+          muted={is_muted}
+          playsInline
+          className="absolute inset-0 w-full h-full object-contain bg-black"
+        />
+      ) : show_video ? (
         <div className="absolute inset-0">
           {render_video_element(video_a_ref, video_a_src, slide_a_style.zIndex ?? 1, slide_a_style.transform || "", slide_a_style.transition || "")}
           {render_video_element(video_b_ref, video_b_src, slide_b_style.zIndex ?? 1, slide_b_style.transform || "", slide_b_style.transition || "")}
@@ -890,7 +917,7 @@ export default function MediaPlayerPage(): JSX.Element {
       )}
 
       {/* ─── Brightness overlay ────────────────────── */}
-      {bright_indicator.active && (
+      {!is_grid && bright_indicator.active && (
         <div
           className="pointer-events-none absolute inset-0 bg-black transition-opacity"
           style={{ opacity: 1 - bright_indicator.pct / 100 }}
@@ -917,7 +944,7 @@ export default function MediaPlayerPage(): JSX.Element {
       )}
 
       {/* ─── Top Bar ────────────────────────────────── */}
-      {controls_visible && (
+      {(is_grid || controls_visible) && (
         <div className="player-controls-area absolute top-0 left-0 right-0 z-20 flex items-center gap-3 bg-gradient-to-b from-black/70 to-transparent px-4 pt-4 pb-6">
           {is_grid && (
             <button
@@ -947,7 +974,7 @@ export default function MediaPlayerPage(): JSX.Element {
       )}
 
       {/* ─── Center: Skip buttons + Play/Pause ──────── */}
-      {controls_visible && show_video && (
+      {controls_visible && show_video && !is_grid && (
         <div className="player-controls-area absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
           <div className="flex items-center gap-6 pointer-events-auto">
             <button onClick={() => skip_time(-15)} className="flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95">
@@ -972,7 +999,7 @@ export default function MediaPlayerPage(): JSX.Element {
       )}
 
       {/* ─── Bottom Controls ────────────────────────── */}
-      {controls_visible && show_video && (
+      {controls_visible && show_video && !is_grid && (
         <div className="player-controls-area absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/80 to-transparent px-4 pb-6 pt-10">
           {/* Progress bar */}
           <div
@@ -1056,17 +1083,17 @@ export default function MediaPlayerPage(): JSX.Element {
       )}
 
       {/* ─── Indicators ─────────────────────────────── */}
-      {speed_active && (
+      {!is_grid && speed_active && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-xl bg-black/75 backdrop-blur px-5 py-3 text-xl font-bold text-white shadow-lg">
           3x
         </div>
       )}
-      {seek_indicator.active && (
+      {!is_grid && seek_indicator.active && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-xl bg-black/75 backdrop-blur px-5 py-3 text-base font-medium text-white shadow-lg animate-fade-in">
           {seek_indicator.time}
         </div>
       )}
-      {vol_indicator.active && (
+      {!is_grid && vol_indicator.active && (
         <div className="absolute right-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2">
           <div className="h-32 w-2.5 rounded-full bg-white/15 overflow-hidden">
             <div className="w-full bg-white/90 rounded-full transition-all" style={{ height: `${vol_indicator.pct}%`, marginTop: `${100 - vol_indicator.pct}%` }} />
@@ -1074,7 +1101,7 @@ export default function MediaPlayerPage(): JSX.Element {
           <span className="text-xs font-medium text-white/80">{vol_indicator.pct}</span>
         </div>
       )}
-      {bright_indicator.active && (
+      {!is_grid && bright_indicator.active && (
         <div className="absolute left-6 top-1/2 -translate-y-1/2 z-30 flex flex-col items-center gap-2">
           <div className="h-32 w-2.5 rounded-full bg-white/15 overflow-hidden">
             <div className="w-full bg-white/90 rounded-full transition-all" style={{ height: `${bright_indicator.pct}%`, marginTop: `${100 - bright_indicator.pct}%` }} />
