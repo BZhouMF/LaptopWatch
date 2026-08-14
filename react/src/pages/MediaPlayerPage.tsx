@@ -879,7 +879,7 @@ export default function MediaPlayerPage(): JSX.Element {
   return (
     <div
       ref={container_ref}
-      className="relative h-dvh w-screen overflow-hidden bg-black select-none touch-none"
+      className="fixed inset-0 overflow-hidden bg-black select-none touch-none"
       {...(!is_grid ? {
         onTouchStart: gesture.handle_touch_start,
         onTouchMove: gesture.handle_touch_move,

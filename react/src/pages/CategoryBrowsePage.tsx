@@ -374,11 +374,16 @@ export default function CategoryBrowsePage() {
     [current_entry, grid_load_page]
   );
 
+  // 视频点击直接交给浏览器原生播放器（返回时从 sessionStorage 恢复浏览栈），图片仍进入自写播放器页
   const open_media = useCallback(
-    (relative_path: string) => {
+    (file: MediaItem) => {
       sessionStorage.setItem(RETURNING_KEY, "1");
       save_stack(nav_stack_ref.current, current_index_ref.current);
-      navigate(`/media/player?path=${encodeURIComponent(relative_path)}`);
+      if (file.is_video) {
+        window.location.href = `/media/serve_media/${encodeURIComponent(file.relative_path)}`;
+      } else {
+        navigate(`/media/player?path=${encodeURIComponent(file.relative_path)}`);
+      }
     },
     [save_stack]
   );
@@ -484,7 +489,7 @@ export default function CategoryBrowsePage() {
               </div>
               <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2">
                 {cat.files.slice(0, 10).map((file) => (
-                  <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
+                  <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file)} />
                 ))}
               </div>
             </section>
@@ -501,7 +506,7 @@ export default function CategoryBrowsePage() {
               </div>
               <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2">
                 {info.root_files.map((file) => (
-                  <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
+                  <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file)} />
                 ))}
               </div>
             </section>
