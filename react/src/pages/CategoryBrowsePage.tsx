@@ -445,7 +445,7 @@ export default function CategoryBrowsePage() {
     return (
       <div className="flex flex-col h-full bg-bg-primary" onClick={handle_click}>
         {/* Header */}
-        <div className="flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
+        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
           {can_go_back && (
             <button
               onClick={navigate_back}
@@ -550,7 +550,7 @@ export default function CategoryBrowsePage() {
   return (
     <div className="flex flex-col h-full bg-bg-primary">
       {/* Grid Header */}
-      <div className="flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
+      <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
         <button
           onClick={navigate_back}
           className="rounded-lg px-3 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
