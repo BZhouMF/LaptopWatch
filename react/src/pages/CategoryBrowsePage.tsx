@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api_client from "../api/client";
+import ThumbImg from "../components/ThumbImg";
 
 // ─── Types ────────────────────────────────────────────
 
@@ -80,12 +81,10 @@ function MediaCard({ file, on_click }: { file: MediaItem; on_click: () => void }
       className="group relative flex flex-col overflow-hidden rounded-xl bg-bg-card border border-border-primary transition-all hover:border-accent-border hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.98]"
     >
       <div className="relative aspect-video bg-bg-secondary overflow-hidden">
-        <img
+        <ThumbImg
           src={`/media/thumbnail/${encodeURIComponent(file.relative_path)}`}
           alt={file.name}
-          loading="lazy"
           className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
         {file.is_video && (
@@ -395,9 +394,13 @@ export default function CategoryBrowsePage() {
   const grid_change_page = useCallback(
     (page: number) => {
       if (!current_entry || current_entry.view !== "grid") return;
-      grid_load_page(current_entry, page);
+      if (current_entry.current_page === page) return;
+      // 立即切换当前页（先显示加载态），数据由下方 useEffect 按需加载。
+      // 翻页不再等待网络请求完成，也不受本页封面加载影响。
+      current_entry.current_page = page;
+      set_nav_stack((prev) => [...prev]);
     },
-    [current_entry, grid_load_page]
+    [current_entry]
   );
 
   // 视频点击直接交给浏览器原生播放器（返回时从 sessionStorage 恢复浏览栈），图片仍进入自写播放器页

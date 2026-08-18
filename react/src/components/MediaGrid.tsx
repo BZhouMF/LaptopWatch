@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import api_client from "../api/client";
+import ThumbImg from "./ThumbImg";
 
 interface MediaItem {
   name: string;
@@ -168,14 +169,10 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
                   className="group relative flex flex-col overflow-hidden rounded-xl bg-bg-card border border-border-primary transition-all hover:border-accent-border hover:shadow-lg hover:-translate-y-0.5 active:scale-[0.98]"
                 >
                   <div className="relative aspect-video bg-bg-secondary overflow-hidden">
-                    <img
+                    <ThumbImg
                       src={`/media/thumbnail/${encodeURIComponent(item.relative_path)}`}
                       alt={item.name}
-                      loading="lazy"
                       className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
                     />
                     {/* Gradient overlay on hover */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
