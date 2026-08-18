@@ -291,10 +291,10 @@ def _upsert_media(conn, parent_id, entry, mtime, is_dir):
         return False
 
     entry_path = entry.path
-    # 图片文件预生成封面，消除首次访问的实时生成延迟
+    # 封面不在同步路径生成：同步只写元数据，避免同步含大量图片的文件夹时被
+    # 批量图片解码阻塞（封面由缩略图接口在用户浏览时按需懒生成并缓存，
+    # 遵循"用户不使用该文件夹就不做额外处理"的原则）
     cover_blob = None
-    if media_type == 'image':
-        cover_blob = _generate_image_cover(entry_path)
     conn.execute(
         "INSERT INTO media (parent_id, name, media_type, path, modify_time, cover) "
         "VALUES (?, ?, ?, ?, ?, ?) "

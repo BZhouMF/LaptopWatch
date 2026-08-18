@@ -32,6 +32,10 @@ def app(temp_dir):
     from blueprints.douyin_api import douyin_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(douyin_bp)
+    # 与 app.py 保持一致：请求结束关闭 DB 连接，
+    # 避免 Windows 下临时 DB 文件（test.db）被占用导致清理失败
+    from utils.db_utils import close_db_connection
+    app.teardown_request(close_db_connection)
     yield app
     config.DB_PATH = None
 

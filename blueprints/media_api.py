@@ -38,6 +38,23 @@ _MAX_RANDOM_CACHE_ENTRIES = 10
 _random_id_cache = {}
 _random_id_cache_lock = threading.Lock()
 
+# 随机模式根目录同步节流：翻页不每次重扫 MEDIA_DIR，避免反复 scandir 大目录
+_RANDOM_ROOT_SYNC_INTERVAL = 30.0
+_last_random_root_sync_ts = 0.0
+_random_root_sync_lock = threading.Lock()
+
+
+def _maybe_sync_random_root(conn):
+    """随机模式根目录轻量同步节流：距上次同步 < 30s 则跳过，不产生额外 IO"""
+    from utils.db_utils import sync_folder
+    global _last_random_root_sync_ts
+    now = time.time()
+    with _random_root_sync_lock:
+        if now - _last_random_root_sync_ts < _RANDOM_ROOT_SYNC_INTERVAL:
+            return
+        _last_random_root_sync_ts = now
+        sync_folder(conn, str(config.MEDIA_DIR))
+
 
 def _media_type(run_mode=None):
     """根据运行模式返回 media_type 字符串"""
@@ -51,7 +68,7 @@ def _db_load_more(offset, limit, is_random):
         if not config.DB_PATH or not config.MEDIA_DIR:
             return False, None
 
-        from utils.db_utils import get_db, traverse_media, init_tables, sync_folder, _format_media_row
+        from utils.db_utils import get_db, traverse_media, init_tables, _format_media_row
         import os as _os
         import random as _random
 
@@ -60,8 +77,9 @@ def _db_load_more(offset, limit, is_random):
 
         if is_random:
             init_tables(conn)
-            # sync_folder 已在 index 页调用，这里只做轻量刷新（1-level scandir）
-            sync_folder(conn, str(config.MEDIA_DIR))
+            # 随机模式翻页不每次重扫根目录：30 秒内只轻量同步一次，
+            # 避免每次翻页都 scandir MEDIA_DIR 的 IO 开销
+            _maybe_sync_random_root(conn)
 
             seed_key = '_random_seed_' + config.RUN_MODE
             from flask import session
