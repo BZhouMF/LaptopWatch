@@ -110,6 +110,7 @@ async def serve_video(file_path: str, request: Request):
             'Accept-Ranges': 'bytes',
             'Content-Length': str(content_length),
             'Content-Type': mimetype,
+            'Cache-Control': 'public, max-age=600',
         }
         if has_range:
             headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'

@@ -179,3 +179,20 @@ class TestThumbnail:
         resp = client.get(f'/media/thumbnail/nonexistent.mp4?path={video_path}')
         assert resp.status_code == 200
         assert resp.content_type.startswith('image/jpeg')
+
+
+class TestServeMedia:
+
+    def test_video_response_has_cache_control(self, client, temp_dir):
+        """视频流响应带缓存头，切回看过的视频可复用浏览器缓存（老设备）"""
+        _create_file(os.path.join(temp_dir, 'clip.mp4'), 'x' * 2048)
+
+        resp = client.get('/media/serve_media/clip.mp4')
+        assert resp.status_code == 200
+        assert resp.headers.get('Cache-Control') == 'public, max-age=600'
+
+        # Range 请求（浏览器实际使用的形式）
+        resp2 = client.get('/media/serve_media/clip.mp4', headers={'Range': 'bytes=0-1023'})
+        assert resp2.status_code == 206
+        assert resp2.headers.get('Cache-Control') == 'public, max-age=600'
+        assert resp2.headers.get('Content-Range') == 'bytes 0-1023/2048'

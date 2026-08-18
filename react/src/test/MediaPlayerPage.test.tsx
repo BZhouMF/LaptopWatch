@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 
 vi.mock("../api/client", () => ({
   default: { get: vi.fn(() => new Promise(() => {})), post: vi.fn() },
@@ -7,6 +9,8 @@ vi.mock("../api/client", () => ({
 vi.mock("../hooks/usePlayerGestures", () => ({
   usePlayerGestures: vi.fn(() => ({})),
 }));
+
+import MediaPlayerPage from "../pages/MediaPlayerPage";
 
 describe("MediaPlayerPage", () => {
   it("module can be imported without error", async () => {
@@ -17,6 +21,17 @@ describe("MediaPlayerPage", () => {
   it("exports a default component", async () => {
     const mod = await import("../pages/MediaPlayerPage");
     expect(typeof mod.default).toBe("function");
+  });
+
+  it("renders a grid image without throwing (regression: load_grid_video TDZ)", async () => {
+    render(
+      <MemoryRouter initialEntries={["/media/player?path=test.jpg"]}>
+        <MediaPlayerPage />
+      </MemoryRouter>
+    );
+    // Grid image mode renders an <img>; before the load_grid_video declaration-order
+    // fix this render threw a ReferenceError (TDZ) on every mount.
+    expect(await screen.findByAltText("test.jpg")).toBeTruthy();
   });
 });
 

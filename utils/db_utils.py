@@ -588,21 +588,22 @@ def _format_media_row(row):
 def traverse_media(conn, root_path, media_type, offset=0, limit=36,
                    sort_type='name', sort_order='asc',
                    random_start=False, exclude_paths=None,
-                   skip_sync=False):
+                   skip_sync=False, root_synced=False):
     """文件夹遍历器：用到才核实，动态队列，逐文件夹收集
 
     - 只 sync_folder(root) 一层以发现直接子文件夹
     - 遍历队列动态推进，处理到哪个文件夹才 sync 哪个
     - 处理中发现的子文件夹追加到队尾，深层嵌套自然处理
     - skip_sync=True 跳过文件系统扫描，纯 DB 读取（用于翻页）
+    - root_synced=True 跳过根目录预同步（调用方已同步过根目录），子文件夹仍按需同步
     - 返回 (items, next_offset, has_more)
     """
     init_tables(conn)
     root_path = os.path.abspath(root_path)
     root_id = _ensure_node(conn, root_path)
 
-    # 同步根目录（1 层）以发现直接子文件夹
-    if not skip_sync:
+    # 同步根目录（1 层）以发现直接子文件夹（调用方已同步过时可跳过）
+    if not skip_sync and not root_synced:
         sync_folder(conn, root_path)
 
     # 从 DB 取根目录的直接子文件夹，构建初始队列

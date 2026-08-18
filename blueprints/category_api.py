@@ -62,6 +62,7 @@ def _get_lazy_page_files(folder_path, offset, limit, run_mode):
                 sort_type=config.SORT_TYPE,
                 sort_order=config.SORT_ORDER,
                 skip_sync=(offset > 0),
+                root_synced=True,  # category_grid_more 已在前面 _sync_db 同步过根目录
             )
             return files, has_more
         return [], False

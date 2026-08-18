@@ -19,6 +19,13 @@ const SPEED_OPTIONS = [2, 1.75, 1.5, 1.25, 1, 0.75];
 const PLAY_ICON = "M8 5v14l11-7z";
 const PAUSE_ICON = "M6 19h4V5H6v14zm8-14v14h4V5h-4z";
 
+// ── 自适应预加载 / 滑动过渡参数（兼顾老设备）──
+const PRELOAD_BUFFER_SECONDS = 2.5;     // 当前视频缓冲余量达到该秒数就开始预取下一集（滑动切换更快就绪）
+const PRELOAD_NEAR_END_SECONDS = 8;     // 当前视频剩余不足该秒数时提前预取，确保衔接
+const PRELOAD_CHECK_INTERVAL_MS = 800;  // 缓冲检查间隔
+const PRELOAD_MAX_CHECKS = 30;          // 最多重试次数（约 24s 后放弃）
+const TRANSITION_TIMEOUT_MS = 2500;     // 滑动切换等待下一集 canplay 的兜底超时
+
 function format_time(seconds: number): string {
   if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
   const m = Math.floor(seconds / 60);
@@ -44,6 +51,7 @@ export default function MediaPlayerPage(): JSX.Element {
   const container_ref = useRef<HTMLDivElement>(null);
   const video_a_ref = useRef<HTMLVideoElement>(null);
   const video_b_ref = useRef<HTMLVideoElement>(null);
+  const video_c_ref = useRef<HTMLVideoElement>(null);
   const image_ref = useRef<HTMLImageElement>(null);
   const progress_ref = useRef<HTMLDivElement>(null);
   const controls_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,6 +63,8 @@ export default function MediaPlayerPage(): JSX.Element {
   const indicator_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preload_pending_ref = useRef(false);
   const is_fetching_ref = useRef(false);
+  const preload_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preload_check_count_ref = useRef(0);
 
   // State proxy refs (for event handlers to avoid stale closures)
   const state_ref = useRef({
@@ -63,9 +73,8 @@ export default function MediaPlayerPage(): JSX.Element {
     selected_speed: 1,
   });
 
-  // Buffer ref — updated synchronously so get_active_video/get_inactive_video
-  // never read a stale buffer after finish_video_switch swaps before React re-renders
-  const active_buffer_ref = useRef<"A" | "B">("A");
+  // 三缓冲：active_slot 指向当前视频槽位（0|1|2），前一个槽位=上一集缓存、后一个=下一集预载
+  const active_slot_ref = useRef(0);
 
   // ── Player state ───────────────────────────────────
   const [status, set_status] = useState<PlayerStatus>("loading");
@@ -80,16 +89,30 @@ export default function MediaPlayerPage(): JSX.Element {
   const [settings_open, set_settings_open] = useState(false);
   const [speed_menu_open, set_speed_menu_open] = useState(false);
   const [is_fullscreen, set_is_fullscreen] = useState(false);
+  // 当前视频是否为横屏（videoWidth > videoHeight）；全屏横屏时锁横屏观看
+  const [is_landscape_video_active, set_is_landscape_video_active] = useState(false);
+  // 设备是否处于竖屏（横屏观看模式下用于提示用户旋转手机）
+  const [is_portrait, setIs_portrait] = useState(false);
   const [speed_active, set_speed_active] = useState(false);
   const [seek_indicator, set_seek_indicator] = useState<{ active: boolean; time: string }>({ active: false, time: "" });
   const [vol_indicator, set_vol_indicator] = useState<{ active: boolean; pct: number }>({ active: false, pct: 100 });
   const [bright_indicator, set_bright_indicator] = useState<{ active: boolean; pct: number }>({ active: false, pct: 100 });
 
-  // Dual-buffer control: always read from refs, use state only for rendering triggers
-  const [active_buffer, set_active_buffer] = useState<"A" | "B">("A");
-  const [slide_anim, set_slide_anim] = useState<{ direction: "next" | "prev"; phase: "start" | "animating" } | null>(null);
+  // 三缓冲控制：始终读 ref，state 仅用于渲染触发
+  const [active_slot, set_active_slot] = useState(0);
+  // 垂直拖拽跟手（抖音风格翻页）：用 ref 直接操作 DOM，避免每次 touchmove 触发 React 重渲染
+  const drag_direction_ref = useRef<"next" | "prev">("next");
+  const drag_y_ref = useRef(0);
+  const drag_active_ref = useRef(false);
+  const drag_timer_ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 翻页/回弹动画（rAF 驱动）状态
+  const animating_ref = useRef(false);
+  const raf_id_ref = useRef(0);
+  // 新手势打断动画时，以当前画面偏移为基准，实现无缝接管
+  const base_offset_ref = useRef(0);
   const [video_a_src, set_video_a_src] = useState("");
   const [video_b_src, set_video_b_src] = useState("");
+  const [video_c_src, set_video_c_src] = useState("");
   const [show_video, set_show_video] = useState(true);
 
   // Douyin state
@@ -107,13 +130,107 @@ export default function MediaPlayerPage(): JSX.Element {
   const grid_path_ref = useRef("");
   const grid_is_video_ref = useRef(true);
 
-  // ── Helper: get active/inactive video refs ──────────
-  const get_active_video = useCallback(() =>
-    active_buffer_ref.current === "A" ? video_a_ref.current : video_b_ref.current,
-  []);
-  const get_inactive_video = useCallback(() =>
-    active_buffer_ref.current === "A" ? video_b_ref.current : video_a_ref.current,
-  []);
+  // ── Helper: 槽位访问（三缓冲）─────────────────
+  const get_slot_video = useCallback((i: number) => {
+    if (i === 0) return video_a_ref.current;
+    if (i === 1) return video_b_ref.current;
+    return video_c_ref.current;
+  }, []);
+  const get_active_video = useCallback(() => get_slot_video(active_slot_ref.current), [get_slot_video]);
+  // 相邻视频：next=后一个槽位(+1)，prev=前一个槽位(+2 即 -1)
+  const get_adjacent_video = useCallback((dir: "next" | "prev") =>
+    get_slot_video((active_slot_ref.current + (dir === "next" ? 1 : 2)) % 3),
+  [get_slot_video]);
+
+  // 直接改视频元素 transform（跟手 + 动画驱动用，不触发 React 重渲染）。
+  // 三槽位都跟随偏移：当前在中间、上一在上、下一在下。
+  const apply_drag_y = useCallback((dy: number, _dir: "next" | "prev") => {
+    const cur = active_slot_ref.current;
+    const set_transform = (v: HTMLVideoElement | null, transform: string) => {
+      if (v) {
+        v.style.transition = "none";
+        v.style.transform = transform;
+      }
+    };
+    set_transform(get_slot_video(cur), `translateY(${dy}px)`);
+    set_transform(get_slot_video((cur + 2) % 3), `translateY(calc(${dy}px - 100%))`);
+    set_transform(get_slot_video((cur + 1) % 3), `translateY(calc(${dy}px + 100%))`);
+  }, [get_slot_video]);
+
+  // 取消进行中的翻页/回弹动画（可打断：新手势立即接管当前进度）
+  const cancel_offset_animation = useCallback(() => {
+    if (animating_ref.current) {
+      animating_ref.current = false;
+      if (raf_id_ref.current) cancelAnimationFrame(raf_id_ref.current);
+      raf_id_ref.current = 0;
+    }
+  }, []);
+
+  // 用 rAF 驱动 offset 从 start_y 平滑运动到 target_y（翻页/回弹统一入口）
+  const start_offset_animation = useCallback(
+    (start_y: number, target_y: number, duration: number, on_complete?: () => void) => {
+      cancel_offset_animation();
+      animating_ref.current = true;
+      const dir = drag_direction_ref.current;
+      const start_t = performance.now();
+      const step = (t: number) => {
+        if (!animating_ref.current) return; // 被新手势打断
+        const p = Math.min(1, (t - start_t) / duration);
+        const eased = 1 - Math.pow(1 - p, 3); // ease-out cubic（先快后慢）
+        const dy = start_y + (target_y - start_y) * eased;
+        drag_y_ref.current = dy;
+        apply_drag_y(dy, dir);
+        if (p < 1) {
+          raf_id_ref.current = requestAnimationFrame(step);
+        } else {
+          animating_ref.current = false;
+          raf_id_ref.current = 0;
+          // 先完成切换（交换缓冲）再复位拖拽状态，避免画面闪回
+          if (on_complete) on_complete();
+        }
+      };
+      raf_id_ref.current = requestAnimationFrame(step);
+    },
+    [apply_drag_y, cancel_offset_animation]
+  );
+
+  // ── 自适应预加载：等当前视频缓冲足够（或临近结束）再预取下一集，避免与当前播放抢带宽 ──
+  const schedule_next_preload = useCallback(() => {
+    if (is_grid) return;
+    preload_check_count_ref.current = 0;
+    const try_preload = () => {
+      if (state_ref.current.is_transitioning) return;
+      const video = get_active_video();
+      if (!video) return;
+      preload_check_count_ref.current += 1;
+      if (preload_check_count_ref.current > PRELOAD_MAX_CHECKS) return;
+      let buffered_ahead = 0;
+      let remaining = 0;
+      if (isFinite(video.duration) && video.duration > 0) {
+        remaining = video.duration - video.currentTime;
+        if (video.buffered.length > 0) {
+          buffered_ahead = video.buffered.end(video.buffered.length - 1) - video.currentTime;
+        }
+      }
+      if (buffered_ahead >= PRELOAD_BUFFER_SECONDS
+          || (video.duration > 0 && remaining <= PRELOAD_NEAR_END_SECONDS && buffered_ahead >= remaining)) {
+        preload_next_ref.current();
+      } else {
+        if (preload_timer_ref.current) clearTimeout(preload_timer_ref.current);
+        preload_timer_ref.current = setTimeout(try_preload, PRELOAD_CHECK_INTERVAL_MS);
+      }
+    };
+    try_preload();
+  }, [is_grid, get_active_video]);
+
+  // 卸载时清理预加载/拖拽定时器/动画
+  useEffect(() => {
+    return () => {
+      cancel_offset_animation();
+      if (preload_timer_ref.current) clearTimeout(preload_timer_ref.current);
+      if (drag_timer_ref.current) clearTimeout(drag_timer_ref.current);
+    };
+  }, [cancel_offset_animation]);
 
   // ── Controls timer ──────────────────────────────────
   const reset_controls_timer = useCallback(() => {
@@ -174,7 +291,7 @@ export default function MediaPlayerPage(): JSX.Element {
     set_is_fullscreen(fs);
     if (!fs) {
       // 退出全屏：恢复视频 CSS（来自原始 onFullscreenChange 逻辑）
-      [video_a_ref.current, video_b_ref.current].forEach((v) => {
+      [video_a_ref.current, video_b_ref.current, video_c_ref.current].forEach((v) => {
         if (!v) return;
         v.style.willChange = "";
         v.style.display = "";
@@ -210,16 +327,13 @@ export default function MediaPlayerPage(): JSX.Element {
       return;
     }
     // Container fullscreen：清除 GPU 合成层诱因（来自原始 enterContainerFullscreen）
+    [get_slot_video(0), get_slot_video(1), get_slot_video(2)].forEach((v) => {
+      if (v) {
+        v.style.willChange = "auto";
+        v.style.transform = "";
+      }
+    });
     const active = get_active_video();
-    const inactive = get_inactive_video();
-    if (active) {
-      active.style.willChange = "auto";
-      active.style.transform = "";
-    }
-    if (inactive) {
-      inactive.style.willChange = "auto";
-      inactive.style.transform = "";
-    }
     const el = container_ref.current;
     if (el) {
       const promise = el.requestFullscreen ? el.requestFullscreen() :
@@ -228,10 +342,10 @@ export default function MediaPlayerPage(): JSX.Element {
         if (active) force_video_repaint(active);
       }).catch(() => {});
     }
-  }, [get_active_video, get_inactive_video, update_fullscreen_state, force_video_repaint]);
+  }, [get_slot_video, get_active_video, update_fullscreen_state, force_video_repaint]);
 
   // ── Video switching ─────────────────────────────────
-  const finish_video_switch = useCallback(() => {
+  const finish_video_switch = useCallback((direction: "next" | "prev") => {
     if (!state_ref.current.is_transitioning) return;
     if (safety_timer_ref.current) {
       clearTimeout(safety_timer_ref.current);
@@ -242,77 +356,58 @@ export default function MediaPlayerPage(): JSX.Element {
       transition_timer_ref.current = null;
     }
     // Pause the outgoing video — do NOT touch CSS styles imperatively.
-    // React cleans up transforms/transitions when slide_anim is set to null
-    // and active_buffer is swapped. Imperative clearing causes both videos
-    // to snap to visible position for one frame → "two videos" flash.
-    const old_active = get_active_video();
+    const old_slot = active_slot_ref.current;
+    const old_active = get_slot_video(old_slot);
     if (old_active) {
       old_active.pause();
     }
-    // Swap buffers: the inactive video becomes active
-    const new_active_buffer = active_buffer_ref.current === "A" ? "B" : "A";
-    active_buffer_ref.current = new_active_buffer;
-    set_active_buffer(new_active_buffer);
-    set_slide_anim(null);
-    // Clear the old buffer's src (now the new inactive) to free memory
-    setTimeout(() => {
-      if (new_active_buffer === "A") set_video_b_src("");
-      else set_video_a_src("");
-    }, 200);
-    // Play the new active video
-    const new_active = new_active_buffer === "A" ? video_a_ref.current : video_b_ref.current;
+    // 槽位轮换：next=+1，prev=-1（即 +2 mod 3）
+    const new_slot = (old_slot + (direction === "next" ? 1 : 2)) % 3;
+    active_slot_ref.current = new_slot;
+    set_active_slot(new_slot);
+    // 不清理刚离开的槽位（作为上一集缓存，下滑秒切）；最远槽位留给下一次预载覆盖
+    const new_active = get_slot_video(new_slot);
     if (new_active) {
+      if (new_active.error) {
+        // 切到的视频加载失败 → 显示错误兜底，而不是黑屏卡死
+        set_status("error");
+        set_error_msg("视频加载失败");
+        state_ref.current.is_transitioning = false;
+        return;
+      }
       new_active.muted = is_muted;
       new_active.playbackRate = selected_speed;
       new_active.play().catch(() => {});
     }
     state_ref.current.is_transitioning = false;
     set_is_playing(true);
-    // Trigger preload for the next video after transition
+    // Trigger preload for the next video after transition（自适应：等当前缓冲足够再预取）
     if (!is_grid) {
-      setTimeout(() => preload_next_ref.current(), 0);
+      schedule_next_preload();
     }
-  }, [get_active_video, get_inactive_video, is_muted, selected_speed, is_grid]);
+  }, [get_slot_video, is_muted, selected_speed, is_grid, schedule_next_preload]);
 
-  const animate_slide_in = useCallback((direction: "next" | "prev") => {
+  const animate_slide_in = useCallback((direction: "next" | "prev", start_y = 0) => {
     state_ref.current.is_transitioning = true;
-    // Mute active video during transition
+    // Mute active video during transition（维持视觉连续，避免双声）
     const active = get_active_video();
     if (active) active.muted = true;
+    drag_direction_ref.current = direction;
+    drag_active_ref.current = true;
+    const target_y = direction === "next" ? -window.innerHeight : window.innerHeight;
+    // 用 rAF 驱动翻页（可被打断），动画自然结束后完成缓冲切换
+    start_offset_animation(start_y, target_y, 250, () => {
+      finish_video_switch(direction);
+      drag_active_ref.current = false;
+      drag_y_ref.current = 0;
+    });
+  }, [get_active_video, start_offset_animation, finish_video_switch]);
 
-    set_slide_anim({ direction, phase: "start" });
-
-    // Set up primary completion: transitionend event on the incoming video
-    const incoming = get_inactive_video();
-    const cleanup_transitionend = () => {
-      clearTimeout(fallback_timer);
-      if (incoming) {
-        incoming.removeEventListener("transitionend", on_transitionend);
-        (incoming as HTMLVideoElement & { _transitionend_fired?: boolean })._transitionend_fired = true;
-      }
-    };
-    const on_transitionend = () => {
-      cleanup_transitionend();
-      finish_video_switch();
-    };
-    if (incoming) {
-      incoming.addEventListener("transitionend", on_transitionend, { once: true });
-    }
-
-    // Fallback timer at 400ms
-    const fallback_timer = setTimeout(() => {
-      cleanup_transitionend();
-      finish_video_switch();
-    }, 400);
-
-    // Safety timer at 1500ms
-    if (safety_timer_ref.current) clearTimeout(safety_timer_ref.current);
-    safety_timer_ref.current = setTimeout(() => {
-      clearTimeout(fallback_timer);
-      cleanup_transitionend();
-      finish_video_switch();
-    }, 1500);
-  }, [get_active_video, get_inactive_video, finish_video_switch]);
+  const set_slot_src = useCallback((slot: number, u: string) => {
+    if (slot === 0) set_video_a_src(u);
+    else if (slot === 1) set_video_b_src(u);
+    else set_video_c_src(u);
+  }, []);
 
   const play_media = useCallback((media: MediaData, direction: "next" | "prev" | null) => {
     if (state_ref.current.is_transitioning) return;
@@ -329,9 +424,8 @@ export default function MediaPlayerPage(): JSX.Element {
     const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
 
     if (!direction) {
-      // First load: load into active buffer — matching original playVideo(null)
+      // First load: load into active slot
       const active = get_active_video();
-      const inactive = get_inactive_video();
       if (active) {
         active.src = url;
         active.muted = is_muted;
@@ -339,28 +433,24 @@ export default function MediaPlayerPage(): JSX.Element {
         active.style.zIndex = "2";
         active.play().catch(() => {});
       }
-      if (inactive) inactive.style.zIndex = "1";
-      // Sync React state for rendering
-      if (active_buffer_ref.current === "A") set_video_a_src(url);
-      else set_video_b_src(url);
+      set_slot_src(active_slot_ref.current, url);
       set_is_playing(true);
       return;
     }
 
-    // Transition: load into inactive buffer — matching original playVideo(transition)
+    // Transition: load into adjacent slot（next=后一个，prev=前一个）
     state_ref.current.is_transitioning = true;
-    const inactive = get_inactive_video();
+    const adjacent_slot = (active_slot_ref.current + (direction === "next" ? 1 : 2)) % 3;
+    const inactive = get_slot_video(adjacent_slot);
     if (!inactive) return;
 
-    // Set muted + playbackRate BEFORE setting src (original lines 497-499)
+    // Set muted + playbackRate BEFORE setting src
     inactive.muted = is_muted;
     inactive.playbackRate = selected_speed;
     inactive.src = url;
-    // Sync React state
-    if (active_buffer_ref.current === "A") set_video_b_src(url);
-    else set_video_a_src(url);
-    // Hide loading immediately after setting src (original line 500)
-    set_status("playing");
+    set_slot_src(adjacent_slot, url);
+    // 等待 canplay 期间显示加载状态（老设备缓冲较慢时避免黑屏无反馈）
+    set_status("loading");
 
     let canplay_fired = false;
     const handle_canplay = () => {
@@ -375,30 +465,46 @@ export default function MediaPlayerPage(): JSX.Element {
 
     inactive.addEventListener("canplay", handle_canplay);
 
-    // 500ms fallback timer (matching original)
-    transition_timer_ref.current = setTimeout(() => {
-      transition_timer_ref.current = null;
-      if (state_ref.current.is_transitioning && !canplay_fired) {
+    // fallback timer：等待 canplay 优先，超时后兜底切换（老设备给更多缓冲时间）。
+    // 下一集完全无数据时不强制切到黑屏（避免"卡死"），重试一轮后报错并复位。
+    let fallback_retries = 0;
+    const try_fallback = () => {
+      if (!state_ref.current.is_transitioning || canplay_fired) return;
+      const has_data = inactive.readyState >= 2 || inactive.buffered.length > 0;
+      if (has_data) {
         inactive.removeEventListener("canplay", handle_canplay);
         animate_slide_in(direction);
+      } else if (fallback_retries < 2) {
+        fallback_retries += 1;
+        transition_timer_ref.current = setTimeout(try_fallback, TRANSITION_TIMEOUT_MS);
+      } else {
+        inactive.removeEventListener("canplay", handle_canplay);
+        set_status("error");
+        set_error_msg("视频加载失败");
+        state_ref.current.is_transitioning = false;
       }
-    }, 500);
-  }, [get_active_video, get_inactive_video, is_muted, selected_speed, animate_slide_in]);
+    };
+    transition_timer_ref.current = setTimeout(try_fallback, TRANSITION_TIMEOUT_MS);
+  }, [get_active_video, get_slot_video, is_muted, selected_speed, animate_slide_in]);
 
   // ── Video events setup ──────────────────────────────
   const setup_video_events = useCallback((video: HTMLVideoElement) => {
-    const is_active = () =>
-      (active_buffer_ref.current === "A" && video === video_a_ref.current) ||
-      (active_buffer_ref.current === "B" && video === video_b_ref.current);
+    const is_active = () => video === get_slot_video(active_slot_ref.current);
 
-    const on_loaded = () => { if (is_active()) { set_duration(video.duration); set_current_time(0); } };
+    const on_loaded = () => {
+      if (is_active()) {
+        set_duration(video.duration);
+        set_current_time(0);
+        set_is_landscape_video_active(video.videoWidth > video.videoHeight);
+      }
+    };
     const on_time = () => {
       if (!state_ref.current.is_dragging && is_active()) {
         set_current_time(video.currentTime);
         set_duration(video.duration);
       }
     };
-    const on_play = () => { if (is_active()) { set_is_playing(true); show_controls(); } };
+    const on_play = () => { if (is_active()) { set_is_playing(true); set_status("playing"); show_controls(); } };
     const on_pause = () => { if (is_active()) { set_is_playing(false); show_controls(); } };
     const on_waiting = () => { if (!video.paused && is_active()) set_status("loading"); };
     const on_canplay = () => {
@@ -408,18 +514,17 @@ export default function MediaPlayerPage(): JSX.Element {
       }
     };
     const on_ended = () => {
-      if (!is_grid) {
-        handle_nav_next_ref.current();
-      } else {
-        video.currentTime = 0;
-        video.play().catch(() => {});
-      }
+      // 只处理当前缓冲的结束事件；播放完毕从头重播（不再自动切下一集）
+      if (!is_active()) return;
+      video.currentTime = 0;
+      video.play().catch(() => {});
     };
     const on_err = () => {
+      // 预载的下一集失败：不打扰当前播放，切换时会检测 error 兜底
+      if (!is_active()) return;
       set_status("error");
       set_error_msg("视频加载失败");
       state_ref.current.is_transitioning = false;
-      set_slide_anim(null);
     };
 
     video.addEventListener("loadedmetadata", on_loaded);
@@ -441,13 +546,14 @@ export default function MediaPlayerPage(): JSX.Element {
       video.removeEventListener("ended", on_ended);
       video.removeEventListener("error", on_err);
     };
-  }, [is_grid, show_controls]);
+  }, [is_grid, show_controls, get_slot_video]);
 
   // Attach events to both video elements
   useEffect(() => {
     const cleanups: (() => void)[] = [];
     if (video_a_ref.current) cleanups.push(setup_video_events(video_a_ref.current));
     if (video_b_ref.current) cleanups.push(setup_video_events(video_b_ref.current));
+    if (video_c_ref.current) cleanups.push(setup_video_events(video_c_ref.current));
     return () => cleanups.forEach((fn) => fn());
   }, [setup_video_events]);
 
@@ -462,10 +568,38 @@ export default function MediaPlayerPage(): JSX.Element {
     };
   }, [update_fullscreen_state]);
 
+  // ── 横屏视频全屏观看模式：锁定横屏 + 竖屏提示旋转设备 ──
+  useEffect(() => {
+    const landscape_watch = is_fullscreen && is_landscape_video_active;
+    let mql: MediaQueryList | null = null;
+
+    if (landscape_watch) {
+      // 尝试锁定横屏（Android 支持；iOS 不支持则靠设备物理旋转）
+      try {
+        const lock_promise = (screen.orientation as unknown as { lock?: (o: string) => Promise<void> })?.lock?.("landscape");
+        if (lock_promise && typeof lock_promise.catch === "function") lock_promise.catch(() => {});
+      } catch { /* 不支持则忽略 */ }
+
+      // 检测设备是否竖屏，竖屏时提示用户横放手机
+      mql = window.matchMedia("(orientation: portrait)");
+      setIs_portrait(mql.matches);
+      const handler = (e: MediaQueryListEvent) => setIs_portrait(e.matches);
+      mql.addEventListener("change", handler);
+      return () => {
+        mql?.removeEventListener("change", handler);
+        // 离开横屏观看模式时解锁
+        try { (screen.orientation as unknown as { unlock?: () => void })?.unlock?.(); } catch { /* ignore */ }
+      };
+    }
+
+    setIs_portrait(false);
+    return undefined;
+  }, [is_fullscreen, is_landscape_video_active]);
+
   useEffect(() => { is_fullscreen_ref.current = is_fullscreen; }, [is_fullscreen]);
   useEffect(() => { history_index_ref.current = history_index; }, [history_index]);
   useEffect(() => { play_history_ref.current = play_history; }, [play_history]);
-  useEffect(() => { active_buffer_ref.current = active_buffer; }, [active_buffer]);
+  useEffect(() => { active_slot_ref.current = active_slot; }, [active_slot]);
 
   // ── Navigation ──────────────────────────────────────
   const handle_nav_next = useCallback(() => {
@@ -509,6 +643,17 @@ export default function MediaPlayerPage(): JSX.Element {
     }
   }, [is_grid, play_media]);
 
+  // ── Grid mode: simple video load (single element, no dual-buffer) ──
+  const load_grid_video = useCallback((url: string) => {
+    const video = video_a_ref.current;
+    if (!video) return;
+    video.src = url;
+    video.muted = is_muted;
+    video.playbackRate = selected_speed;
+    video.play().catch(() => {});
+    set_video_a_src(url);
+  }, [is_muted, selected_speed]);
+
   // ── Grid navigation ─────────────────────────────────
   const navigate_grid = useCallback(async (direction: "next" | "prev") => {
     if (!grid_path_ref.current) return;
@@ -547,17 +692,6 @@ export default function MediaPlayerPage(): JSX.Element {
     }
   }, [load_grid_video, status]);
 
-  // ── Grid mode: simple video load (single element, no dual-buffer) ──
-  const load_grid_video = useCallback((url: string) => {
-    const video = video_a_ref.current;
-    if (!video) return;
-    video.src = url;
-    video.muted = is_muted;
-    video.playbackRate = selected_speed;
-    video.play().catch(() => {});
-    set_video_a_src(url);
-  }, [is_muted, selected_speed]);
-
   // ── Preload next (douyin mode) ──────────────────────
   const preload_next = useCallback(async () => {
     if (is_grid || state_ref.current.is_transitioning || preload_pending_ref.current) return;
@@ -567,10 +701,8 @@ export default function MediaPlayerPage(): JSX.Element {
     if (next_idx < cur_history.length) {
       preload_index_ref.current = next_idx;
       const url = `/media/serve_media/${encodeURIComponent(cur_history[next_idx].relative_path)}`;
-      // Set via React state only — avoids one-frame flash where inactive video
-      // has src but no translateY(100%) transform yet (visible on slower browsers)
-      if (active_buffer_ref.current === "A") set_video_b_src(url);
-      else set_video_a_src(url);
+      // 预载下一集到 next 槽位（active+1）
+      set_slot_src((active_slot_ref.current + 1) % 3, url);
       return;
     }
     preload_pending_ref.current = true;
@@ -591,13 +723,11 @@ export default function MediaPlayerPage(): JSX.Element {
           return next;
         });
         const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
-        // Set via React state only — same reason as above
-        if (active_buffer_ref.current === "A") set_video_b_src(url);
-        else set_video_a_src(url);
+        set_slot_src((active_slot_ref.current + 1) % 3, url);
       }
     } catch { /* ignore */ }
     finally { preload_pending_ref.current = false; }
-  }, [is_grid, is_muted, selected_speed, get_inactive_video]);
+  }, [is_grid, is_muted, selected_speed, set_slot_src]);
 
   // ── Douyin API ──────────────────────────────────────
   const fetch_douyin_next = useCallback(async () => {
@@ -643,13 +773,13 @@ export default function MediaPlayerPage(): JSX.Element {
         set_play_history([resp.data.data]);
         set_history_index(0);
         play_media(resp.data.data, null);
-        // Preload next video immediately (matching original's preloadNextVideo call)
-        preload_next();
+        // 自适应预加载下一集（等当前视频缓冲足够，避免老设备抢带宽）
+        schedule_next_preload();
         return;
       }
     } catch { /* fallback to next */ }
     fetch_douyin_next();
-  }, [play_media, fetch_douyin_next, preload_next]);
+  }, [play_media, fetch_douyin_next, schedule_next_preload]);
 
   // ── Initialize ──────────────────────────────────────
   useEffect(() => {
@@ -684,14 +814,6 @@ export default function MediaPlayerPage(): JSX.Element {
   useEffect(() => { animate_slide_in_ref.current = animate_slide_in; }, [animate_slide_in]);
   useEffect(() => { preload_next_ref.current = preload_next; }, [preload_next]);
 
-  // Transition slide animation from "start" to "animating" phase
-  useEffect(() => {
-    if (slide_anim?.phase !== "start") return;
-    const raf = requestAnimationFrame(() => {
-      set_slide_anim({ direction: slide_anim.direction, phase: "animating" });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [slide_anim]);
 
   // ── Actions ─────────────────────────────────────────
   const toggle_play = useCallback(() => {
@@ -704,31 +826,199 @@ export default function MediaPlayerPage(): JSX.Element {
   const set_speed = useCallback((speed: number) => {
     set_selected_speed(speed);
     state_ref.current.selected_speed = speed;
-    const av = get_active_video();
-    const iv = get_inactive_video();
-    if (av) av.playbackRate = speed;
-    if (iv) iv.playbackRate = speed;
+    [get_slot_video(0), get_slot_video(1), get_slot_video(2)].forEach((v) => {
+      if (v) v.playbackRate = speed;
+    });
     set_speed_menu_open(false);
     set_settings_open(false);
-  }, [get_active_video, get_inactive_video]);
+  }, [get_slot_video]);
 
   const toggle_mute = useCallback(() => {
     set_is_muted((prev) => {
       const next = !prev;
-      const av = get_active_video();
-      const iv = get_inactive_video();
-      if (av) av.muted = next;
-      if (iv) iv.muted = next;
+      [get_slot_video(0), get_slot_video(1), get_slot_video(2)].forEach((v) => {
+        if (v) v.muted = next;
+      });
       return next;
     });
-  }, [get_active_video, get_inactive_video]);
+  }, [get_slot_video]);
+
+  // 音量/亮度调整（垂直滑动已改为翻页，这里通过设置面板 +/- 调整）
+  const step_volume = useCallback((delta: number) => {
+    const video = get_active_video();
+    if (!video) return;
+    const new_vol = Math.max(0, Math.min(1, (video.volume || 0) + delta));
+    video.volume = new_vol;
+    set_vol_indicator({ active: true, pct: Math.round(new_vol * 100) });
+    if (indicator_timer_ref.current) clearTimeout(indicator_timer_ref.current);
+    indicator_timer_ref.current = setTimeout(() => {
+      set_vol_indicator({ active: false, pct: Math.round((get_active_video()?.volume || 0) * 100) });
+    }, 600);
+  }, [get_active_video]);
+
+  const step_brightness = useCallback((delta: number) => {
+    set_bright_indicator((prev) => {
+      const new_pct = Math.max(10, Math.min(100, prev.pct + delta));
+      return { active: true, pct: new_pct };
+    });
+    if (indicator_timer_ref.current) clearTimeout(indicator_timer_ref.current);
+    indicator_timer_ref.current = setTimeout(() => {
+      set_bright_indicator((prev) => ({ ...prev, active: false }));
+    }, 600);
+  }, []);
 
   const skip_time = useCallback((delta: number) => {
     const video = get_active_video();
     if (!video) return;
-    video.currentTime = Math.max(0, Math.min(video.currentTime + delta, video.duration || 0));
+    // 元数据未就绪（duration 为 NaN/Infinity）时不 seek，避免媒体管线挂起
+    if (!isFinite(video.duration)) return;
+    video.currentTime = Math.max(0, Math.min(video.currentTime + delta, video.duration));
     update_progress();
   }, [get_active_video, update_progress]);
+
+  // 播放失败后重试当前视频
+  const retry_current = useCallback(() => {
+    const media = current_media;
+    if (!media || !media.is_video) return;
+    const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
+    const active = get_active_video();
+    if (active) {
+      active.src = url;
+      active.muted = is_muted;
+      active.play().catch(() => {});
+    }
+    set_status("loading");
+    set_error_msg("");
+  }, [current_media, get_active_video, is_muted]);
+
+  // ── 垂直拖拽跟手（抖音风格翻页）────────────────
+  const reset_drag = useCallback(() => {
+    cancel_offset_animation();
+    drag_active_ref.current = false;
+    drag_y_ref.current = 0;
+    drag_direction_ref.current = "next";
+    state_ref.current.is_transitioning = false;
+  }, [cancel_offset_animation]);
+
+  // 下一集不在历史里时，拖动期间立即拉取，让切换时尽量就绪
+  const fetch_next_for_drag = useCallback(() => {
+    if (preload_pending_ref.current) return;
+    preload_pending_ref.current = true;
+    api_client.get<{ code: number; data: MediaData }>("/api/douyin/next", { timeout: 8000 })
+      .then((resp) => {
+        if (resp.data.code === 0 && resp.data.data) {
+          set_play_history((prev) => {
+            const existing = prev.findIndex((m) => m.relative_path === resp.data.data.relative_path);
+            if (existing >= 0) return prev;
+            return [...prev, resp.data.data];
+          });
+          const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
+          set_slot_src((active_slot_ref.current + 1) % 3, url);
+        }
+      })
+      .catch(() => {})
+      .finally(() => { preload_pending_ref.current = false; });
+  }, [set_slot_src]);
+
+  const prepare_inactive_for_drag = useCallback((direction: "next" | "prev") => {
+    const history = play_history_ref.current;
+    const cur_idx = history_index_ref.current;
+    if (direction === "next") {
+      const next = history[cur_idx + 1];
+      if (next) {
+        const url = `/media/serve_media/${encodeURIComponent(next.relative_path)}`;
+        set_slot_src((active_slot_ref.current + 1) % 3, url);
+      } else {
+        // 下一集未预载 → 立即拉取
+        fetch_next_for_drag();
+      }
+    } else {
+      const prev = history[cur_idx - 1];
+      if (prev) {
+        const url = `/media/serve_media/${encodeURIComponent(prev.relative_path)}`;
+        set_slot_src((active_slot_ref.current + 2) % 3, url);
+      }
+    }
+  }, [fetch_next_for_drag, set_slot_src]);
+
+  // 新手势开始拖动：以当前画面偏移为基准（打断翻页动画时无缝接管）
+  const handle_drag_start = useCallback(() => {
+    base_offset_ref.current = drag_y_ref.current;
+  }, []);
+
+  const handle_drag_move = useCallback((dy: number) => {
+    const direction: "next" | "prev" = dy < 0 ? "next" : "prev";
+    // 打断进行中的翻页/回弹动画，从当前偏移继续跟手
+    if (animating_ref.current) {
+      cancel_offset_animation();
+    }
+    if (drag_direction_ref.current !== direction) {
+      drag_direction_ref.current = direction;
+      prepare_inactive_for_drag(direction);
+    }
+    if (!drag_active_ref.current) {
+      drag_active_ref.current = true;
+      state_ref.current.is_transitioning = true;
+    }
+    const offset = base_offset_ref.current + dy;
+    drag_y_ref.current = offset;
+    apply_drag_y(offset, direction);
+  }, [prepare_inactive_for_drag, apply_drag_y, cancel_offset_animation]);
+
+  // 翻页动画自然结束后完成缓冲切换（视觉已滑到位）
+  const finish_drag_switch = useCallback((direction: "next" | "prev") => {
+    const history = play_history_ref.current;
+    const cur_idx = history_index_ref.current;
+    if (direction === "next") {
+      const next_idx = cur_idx + 1;
+      if (next_idx < history.length) {
+        set_history_index(next_idx);
+        preload_index_ref.current = next_idx;
+      } else {
+        // 下一集仍未就绪 → 走 fetch 流程接管
+        state_ref.current.is_transitioning = false;
+        reset_drag();
+        fetch_douyin_next();
+        return;
+      }
+    } else {
+      const prev_idx = cur_idx - 1;
+      if (prev_idx >= 0) {
+        set_history_index(prev_idx);
+        preload_index_ref.current = prev_idx;
+      } else {
+        // 没有上一集 → 回弹
+        reset_drag();
+        return;
+      }
+    }
+    // 交换缓冲 + 播放新视频（复用 finish_video_switch）
+    state_ref.current.is_transitioning = true;
+    finish_video_switch(direction);
+    // 复位拖拽视觉（缓冲交换后 base 分支正确，避免闪回）
+    drag_active_ref.current = false;
+    drag_y_ref.current = 0;
+  }, [fetch_douyin_next, finish_video_switch, reset_drag]);
+
+  const handle_drag_end = useCallback((direction: "next" | "prev" | null) => {
+    if (drag_timer_ref.current) clearTimeout(drag_timer_ref.current);
+    if (direction === null) {
+      // 松手不够距离/速度 → rAF 回弹到原位
+      const start_y = drag_y_ref.current;
+      start_offset_animation(start_y, 0, 200, () => {
+        drag_active_ref.current = false;
+        drag_y_ref.current = 0;
+        state_ref.current.is_transitioning = false;
+        schedule_next_preload();
+      });
+      return;
+    }
+    // 翻页：rAF 驱动到 ±屏幕高度，动画自然结束后完成切换
+    const target_y = direction === "next" ? -window.innerHeight : window.innerHeight;
+    start_offset_animation(drag_y_ref.current, target_y, 250, () => {
+      finish_drag_switch(direction);
+    });
+  }, [finish_drag_switch, schedule_next_preload, start_offset_animation]);
 
   // ── Gesture system ─────────────────────────────────
   const gesture_callbacks = useMemo<GestureCallbacks>(() => ({
@@ -740,8 +1030,8 @@ export default function MediaPlayerPage(): JSX.Element {
     },
     on_seek: (seconds: number) => {
       const video = get_active_video();
-      if (!video) return;
-      const target = Math.max(0, Math.min(seek_base_ref.current + seconds, video.duration || 0));
+      if (!video || !isFinite(video.duration)) return;
+      const target = Math.max(0, Math.min(seek_base_ref.current + seconds, video.duration));
       video.currentTime = target;
       set_current_time(target);
       set_seek_indicator({ active: true, time: format_time(target) });
@@ -756,23 +1046,31 @@ export default function MediaPlayerPage(): JSX.Element {
     on_adjust_volume: (delta: number) => {
       const video = get_active_video();
       if (!video) return;
-      const new_vol = Math.max(0, Math.min(1, video.volume + delta));
+      const new_vol = Math.max(0, Math.min(1, (video.volume || 0) + delta));
       video.volume = new_vol;
       set_vol_indicator({ active: true, pct: Math.round(new_vol * 100) });
     },
     on_adjust_brightness: (delta: number) => {
       set_bright_indicator((prev) => {
-        const cur_pct = prev.pct;
-        const new_pct = Math.max(10, Math.min(100, cur_pct + Math.round(delta * 100)));
+        const new_pct = Math.max(10, Math.min(100, prev.pct + Math.round(delta * 100)));
         return { active: true, pct: new_pct };
       });
     },
     on_adjust_end: () => {
       if (indicator_timer_ref.current) clearTimeout(indicator_timer_ref.current);
       indicator_timer_ref.current = setTimeout(() => {
-        set_vol_indicator({ active: false, pct: 100 });
-        set_bright_indicator({ active: false, pct: 100 });
-      }, 800);
+        set_vol_indicator((prev) => ({ ...prev, active: false }));
+        set_bright_indicator((prev) => ({ ...prev, active: false }));
+      }, 600);
+    },
+    on_drag_start: () => {
+      handle_drag_start();
+    },
+    on_drag_move: (dy: number) => {
+      handle_drag_move(dy);
+    },
+    on_drag_end: (direction: "next" | "prev" | null) => {
+      handle_drag_end(direction);
     },
     on_long_press_start: () => {
       set_speed_active(true);
@@ -786,7 +1084,7 @@ export default function MediaPlayerPage(): JSX.Element {
     },
     is_fullscreen: () => is_fullscreen_ref.current,
     is_video_active: () => show_video && !!(current_media?.is_video),
-  }), [handle_nav_next, handle_nav_prev, toggle_play, reset_controls_timer, get_active_video, selected_speed, show_video, current_media?.is_video]);
+  }), [handle_nav_next, handle_nav_prev, toggle_play, reset_controls_timer, get_active_video, selected_speed, show_video, current_media?.is_video, handle_drag_start, handle_drag_move, handle_drag_end]);
 
   const gesture = usePlayerGestures(gesture_callbacks);
 
@@ -823,58 +1121,51 @@ export default function MediaPlayerPage(): JSX.Element {
   // ── Render helpers ──────────────────────────────────
   const progress_pct = duration > 0 ? (current_time / duration) * 100 : 0;
 
-  const render_video_element = (ref: React.RefObject<HTMLVideoElement | null>, src: string, z_index: number, transform: string, transition: string) => (
+  const render_video_element = (ref: React.RefObject<HTMLVideoElement | null>, src: string, z_index: number | string, transform: string, transition: string, is_active: boolean) => (
+    // 单一稳定结构：视频元素不随状态重挂载（避免黑屏/卡顿）
     <video
       ref={ref}
       src={src}
+      poster={src ? src.replace("/media/serve_media/", "/media/thumbnail/") : ""}
       muted={is_muted}
       playsInline
-      preload={is_grid ? "metadata" : "auto"}
-      className="absolute inset-0 w-full h-full object-contain bg-black"
-      style={{ zIndex: z_index, transform, transition }}
+      // 非当前缓冲用 metadata 轻量预载：减少拖动/切换时第二个解码器抢资源导致当前视频卡顿
+      preload={is_grid ? "metadata" : is_active ? "auto" : "metadata"}
+      className="absolute inset-0 h-full w-full object-contain bg-black"
+      style={{ zIndex: z_index, transform, transition, willChange: "transform" }}
     />
   );
 
-  // ── Slide animation CSS ─────────────────────────────
-  const slide_a_style: React.CSSProperties = {};
-  const slide_b_style: React.CSSProperties = {};
+  // ── 三槽位定位 ────────────────────────────────────
+  const slot_styles: React.CSSProperties[] = [{}, {}, {}];
+  const cur_slot = active_slot;
+  const prev_slot = (cur_slot + 2) % 3;
+  const next_slot = (cur_slot + 1) % 3;
 
-  if (slide_anim) {
-    const is_a_active = active_buffer === "A";
-    const from_y = slide_anim.direction === "next" ? "translateY(100%)" : "translateY(-100%)";
-    const out_y = slide_anim.direction === "next" ? "translateY(-100%)" : "translateY(100%)";
-    const trans = "transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)";
-    const is_start = slide_anim.phase === "start";
-
-    if (is_a_active) {
-      slide_a_style.transform = out_y;
-      slide_a_style.transition = trans;
-      slide_a_style.zIndex = 1;
-      slide_b_style.transform = is_start ? from_y : "translateY(0)";
-      slide_b_style.transition = is_start ? "none" : trans;
-      slide_b_style.zIndex = 2;
-    } else {
-      slide_b_style.transform = out_y;
-      slide_b_style.transition = trans;
-      slide_b_style.zIndex = 1;
-      slide_a_style.transform = is_start ? from_y : "translateY(0)";
-      slide_a_style.transition = is_start ? "none" : trans;
-      slide_a_style.zIndex = 2;
-    }
+  if (drag_active_ref.current) {
+    // 跟手/翻页/回弹共用：读 ref（与 imperative DOM 操作一致，重渲染时保持一致）
+    const dy = drag_y_ref.current;
+    slot_styles[cur_slot].transform = `translateY(${dy}px)`;
+    slot_styles[cur_slot].transition = "none";
+    slot_styles[cur_slot].zIndex = 2;
+    slot_styles[prev_slot].transform = `translateY(calc(${dy}px - 100%))`;
+    slot_styles[prev_slot].transition = "none";
+    slot_styles[prev_slot].zIndex = 1;
+    slot_styles[next_slot].transform = `translateY(calc(${dy}px + 100%))`;
+    slot_styles[next_slot].transition = "none";
+    slot_styles[next_slot].zIndex = 1;
   } else {
-    if (active_buffer === "A") {
-      slide_a_style.zIndex = 2;
-      slide_b_style.zIndex = 1;
-    } else {
-      slide_b_style.zIndex = 2;
-      slide_a_style.zIndex = 1;
-    }
-    const inactive_src = active_buffer === "A" ? video_b_src : video_a_src;
-    if (inactive_src) {
-      if (active_buffer === "A") slide_b_style.transform = "translateY(100%)";
-      else slide_a_style.transform = "translateY(100%)";
-    }
+    // 静止：当前在最前，上一/下一在上下待命
+    slot_styles[cur_slot].zIndex = 2;
+    slot_styles[prev_slot].zIndex = 1;
+    slot_styles[next_slot].zIndex = 1;
+    slot_styles[prev_slot].transform = "translateY(-100%)";
+    slot_styles[next_slot].transform = "translateY(100%)";
   }
+
+  // 当前音量显示（设置面板）
+  const active_video_el = get_slot_video(cur_slot);
+  const vol_pct = Math.round((active_video_el?.volume || 0) * 100);
 
   return (
     <div
@@ -884,6 +1175,7 @@ export default function MediaPlayerPage(): JSX.Element {
         onTouchStart: gesture.handle_touch_start,
         onTouchMove: gesture.handle_touch_move,
         onTouchEnd: gesture.handle_touch_end,
+        onTouchCancel: () => handle_drag_end(null),
         onClick: gesture.handle_click,
         onMouseDown: gesture.handle_mouse_down,
         onMouseUp: gesture.handle_mouse_up,
@@ -904,8 +1196,9 @@ export default function MediaPlayerPage(): JSX.Element {
         />
       ) : show_video ? (
         <div className="absolute inset-0">
-          {render_video_element(video_a_ref, video_a_src, slide_a_style.zIndex ?? 1, slide_a_style.transform || "", slide_a_style.transition || "")}
-          {render_video_element(video_b_ref, video_b_src, slide_b_style.zIndex ?? 1, slide_b_style.transform || "", slide_b_style.transition || "")}
+          {render_video_element(video_a_ref, video_a_src, slot_styles[0].zIndex ?? 1, slot_styles[0].transform || "", slot_styles[0].transition || "", cur_slot === 0)}
+          {render_video_element(video_b_ref, video_b_src, slot_styles[1].zIndex ?? 1, slot_styles[1].transform || "", slot_styles[1].transition || "", cur_slot === 1)}
+          {render_video_element(video_c_ref, video_c_src, slot_styles[2].zIndex ?? 1, slot_styles[2].transform || "", slot_styles[2].transition || "", cur_slot === 2)}
         </div>
       ) : (
         <img
@@ -916,8 +1209,8 @@ export default function MediaPlayerPage(): JSX.Element {
         />
       )}
 
-      {/* ─── Brightness overlay ────────────────────── */}
-      {!is_grid && bright_indicator.active && (
+      {/* ─── Brightness overlay（pct 持久生效，active 只控制指示条显隐）─── */}
+      {!is_grid && (
         <div
           className="pointer-events-none absolute inset-0 bg-black transition-opacity"
           style={{ opacity: 1 - bright_indicator.pct / 100 }}
@@ -925,7 +1218,8 @@ export default function MediaPlayerPage(): JSX.Element {
       )}
 
       {/* ─── Loading / Error / End ──────────────────── */}
-      {status === "loading" && (
+      {/* 只在完全无视频可显示（首帧未加载）时才转圈；有 src 就显示 poster 封面兜底，避免转圈盖住画面 */}
+      {status === "loading" && !video_a_src && !video_b_src && !video_c_src && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
         </div>
@@ -938,8 +1232,14 @@ export default function MediaPlayerPage(): JSX.Element {
         </div>
       )}
       {error_msg && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 rounded-xl bg-danger/90 backdrop-blur px-4 py-2.5 text-sm font-medium text-white shadow-lg animate-fade-in">
-          {error_msg}
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-xl bg-danger/90 backdrop-blur px-4 py-2.5 text-sm font-medium text-white shadow-lg animate-fade-in">
+          <span>{error_msg}</span>
+          <button
+            onClick={retry_current}
+            className="shrink-0 rounded-md bg-white/20 px-3 py-1 text-xs font-semibold text-white hover:bg-white/30 transition"
+          >
+            重试
+          </button>
         </div>
       )}
 
@@ -973,28 +1273,31 @@ export default function MediaPlayerPage(): JSX.Element {
         </div>
       )}
 
-      {/* ─── Center: Skip buttons + Play/Pause ──────── */}
+      {/* ─── Center: Play/Pause + 左右两侧 Skip 按钮 ──── */}
       {controls_visible && show_video && !is_grid && (
-        <div className="player-controls-area absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-          <div className="flex items-center gap-6 pointer-events-auto">
-            <button onClick={() => skip_time(-15)} className="flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95">
-              <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-              </svg>
-              <span className="text-[10px] font-medium mt-0.5">15</span>
-            </button>
-            <button onClick={toggle_play} className="flex items-center justify-center rounded-full bg-white/15 w-16 h-16 text-white transition hover:bg-white/25 hover:scale-105 active:scale-95">
+        <div className="player-controls-area absolute inset-0 z-10 pointer-events-none">
+          {/* 中心：播放/暂停 */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <button onClick={toggle_play} className="flex items-center justify-center rounded-full bg-white/15 w-16 h-16 text-white transition hover:bg-white/25 hover:scale-105 active:scale-95 pointer-events-auto">
               <svg className="h-7 w-7" fill="currentColor" viewBox="0 0 24 24">
                 {show_video ? (is_playing ? <path d={PAUSE_ICON}/> : <path d={PLAY_ICON}/>) : <path d={PLAY_ICON}/>}
               </svg>
             </button>
-            <button onClick={() => skip_time(15)} className="flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95">
-              <svg className="h-5 w-5 rotate-180" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
-              </svg>
-              <span className="text-[10px] font-medium mt-0.5">15</span>
-            </button>
           </div>
+          {/* 左：后退 15s */}
+          <button onClick={() => skip_time(-15)} className="absolute left-6 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95 pointer-events-auto">
+            <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+            </svg>
+            <span className="text-[10px] font-medium mt-0.5">15</span>
+          </button>
+          {/* 右：前进 15s */}
+          <button onClick={() => skip_time(15)} className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col items-center justify-center rounded-full bg-white/10 w-14 h-14 text-white/80 transition hover:bg-white/20 hover:scale-105 active:scale-95 pointer-events-auto">
+            <svg className="h-5 w-5 rotate-180" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>
+            </svg>
+            <span className="text-[10px] font-medium mt-0.5">15</span>
+          </button>
         </div>
       )}
 
@@ -1036,13 +1339,41 @@ export default function MediaPlayerPage(): JSX.Element {
                 设置
               </button>
               {settings_open && (
-                <div className="absolute bottom-full right-0 mb-2 rounded-xl bg-black/90 border border-white/10 py-1.5 shadow-xl backdrop-blur min-w-[130px] animate-fade-in">
+                <div className="absolute bottom-full right-0 mb-2 rounded-xl bg-black/90 border border-white/10 py-1.5 shadow-xl backdrop-blur min-w-[190px] animate-fade-in">
                   <button
                     onClick={() => { toggle_mute(); set_settings_open(false); }}
                     className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-white/80 hover:bg-white/10 transition"
                   >
                     {is_muted ? "🔇 取消静音" : "🔊 静音"}
                   </button>
+                  <div className="flex items-center justify-between px-4 py-2 text-sm text-white/80">
+                    <span className="shrink-0">音量</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => step_volume(-0.1)}
+                        className="h-7 w-7 rounded-md bg-white/10 text-white/80 hover:bg-white/20"
+                      >−</button>
+                      <span className="w-10 text-center text-xs text-white/50">{vol_pct}%</span>
+                      <button
+                        onClick={() => step_volume(0.1)}
+                        className="h-7 w-7 rounded-md bg-white/10 text-white/80 hover:bg-white/20"
+                      >+</button>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-2 text-sm text-white/80">
+                    <span className="shrink-0">亮度</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => step_brightness(-10)}
+                        className="h-7 w-7 rounded-md bg-white/10 text-white/80 hover:bg-white/20"
+                      >−</button>
+                      <span className="w-10 text-center text-xs text-white/50">{bright_indicator.pct}%</span>
+                      <button
+                        onClick={() => step_brightness(10)}
+                        className="h-7 w-7 rounded-md bg-white/10 text-white/80 hover:bg-white/20"
+                      >+</button>
+                    </div>
+                  </div>
                   <div className="relative">
                     <button
                       onClick={() => set_speed_menu_open((prev) => !prev)}
@@ -1084,7 +1415,7 @@ export default function MediaPlayerPage(): JSX.Element {
 
       {/* ─── Indicators ─────────────────────────────── */}
       {!is_grid && speed_active && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 rounded-xl bg-black/75 backdrop-blur px-5 py-3 text-xl font-bold text-white shadow-lg">
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 rounded-xl bg-black/40 backdrop-blur-md px-4 py-2 text-base font-semibold text-white/60 shadow-lg">
           3x
         </div>
       )}
@@ -1107,6 +1438,16 @@ export default function MediaPlayerPage(): JSX.Element {
             <div className="w-full bg-white/90 rounded-full transition-all" style={{ height: `${bright_indicator.pct}%`, marginTop: `${100 - bright_indicator.pct}%` }} />
           </div>
           <span className="text-xs font-medium text-white/80">{bright_indicator.pct}</span>
+        </div>
+      )}
+
+      {/* ─── 横屏观看：设备竖屏时提示旋转 ────────────── */}
+      {is_portrait && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-black/90 text-white">
+          <svg className="h-16 w-16 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          <p className="text-base font-medium">请将手机横过来观看</p>
         </div>
       )}
     </div>

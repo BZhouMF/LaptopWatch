@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api_client from "../api/client";
 
@@ -46,6 +46,7 @@ interface GridEntry {
 interface CategoryEntry {
   view: "category";
   data: CategoryInfo;
+  scroll_top?: number;
 }
 
 type NavEntry = CategoryEntry | GridEntry;
@@ -60,6 +61,14 @@ function Spinner() {
   return (
     <div className="flex justify-center py-10">
       <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
+    </div>
+  );
+}
+
+function LoadingOverlay() {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-bg-primary/40">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
     </div>
   );
 }
@@ -119,6 +128,14 @@ export default function CategoryBrowsePage() {
   useEffect(() => { current_index_ref.current = current_index; }, [current_index]);
   const nav_stack_ref = useRef(nav_stack);
   useEffect(() => { nav_stack_ref.current = nav_stack; }, [nav_stack]);
+
+  // 离开当前视图前保存分类页滚动位置，返回时恢复（进入前在哪，返回后就在哪）
+  const save_current_scroll = useCallback(() => {
+    const entry = nav_stack_ref.current[current_index_ref.current];
+    if (entry?.view === "category") {
+      entry.scroll_top = window.scrollY;
+    }
+  }, []);
 
   // Fetch mode config for page size
   useEffect(() => {
@@ -210,6 +227,7 @@ export default function CategoryBrowsePage() {
 
   const navigate_to_grid_internal = useCallback(
     (folder_path: string, folder_name: string, parent_path: string, push_history: boolean) => {
+      save_current_scroll();
       const entry: GridEntry = {
         view: "grid",
         folder_path,
@@ -232,11 +250,12 @@ export default function CategoryBrowsePage() {
         window.history.pushState({ spaIndex: new_index }, "");
       }
     },
-    [mode_config]
+    [mode_config, save_current_scroll]
   );
 
   const navigate_to_category = useCallback(
     async (folder_path: string, push_history: boolean) => {
+      save_current_scroll();
       set_is_loading(true);
       try {
         const resp = await api_client.get<{ code: number; data: CategoryInfo }>(
@@ -273,7 +292,7 @@ export default function CategoryBrowsePage() {
       } catch { /* ignore */ }
       finally { set_is_loading(false); }
     },
-    [save_stack, navigate_to_grid_internal]
+    [save_stack, navigate_to_grid_internal, save_current_scroll]
   );
 
   const navigate_to_grid = useCallback(
@@ -366,6 +385,13 @@ export default function CategoryBrowsePage() {
     }
   }, [current_entry]);
 
+  // 返回到分类视图时恢复之前保存的滚动位置
+  useLayoutEffect(() => {
+    if (current_entry?.view === "category" && current_entry.scroll_top !== undefined) {
+      window.scrollTo(0, current_entry.scroll_top);
+    }
+  }, [current_entry]);
+
   const grid_change_page = useCallback(
     (page: number) => {
       if (!current_entry || current_entry.view !== "grid") return;
@@ -377,6 +403,7 @@ export default function CategoryBrowsePage() {
   // 视频点击直接交给浏览器原生播放器（返回时从 sessionStorage 恢复浏览栈），图片仍进入自写播放器页
   const open_media = useCallback(
     (file: MediaItem) => {
+      save_current_scroll();
       sessionStorage.setItem(RETURNING_KEY, "1");
       save_stack(nav_stack_ref.current, current_index_ref.current);
       if (file.is_video) {
@@ -385,7 +412,7 @@ export default function CategoryBrowsePage() {
         navigate(`/media/player?path=${encodeURIComponent(file.relative_path)}`);
       }
     },
-    [save_stack]
+    [save_stack, save_current_scroll]
   );
 
   // ── Render helpers ───────────────────────────────────
@@ -444,6 +471,7 @@ export default function CategoryBrowsePage() {
 
     return (
       <div className="flex flex-col h-full bg-bg-primary" onClick={handle_click}>
+        {is_loading && nav_stack.length > 0 && <LoadingOverlay />}
         {/* Header */}
         <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
           {can_go_back && (
@@ -549,6 +577,7 @@ export default function CategoryBrowsePage() {
 
   return (
     <div className="flex flex-col h-full bg-bg-primary">
+      {is_loading && nav_stack.length > 0 && <LoadingOverlay />}
       {/* Grid Header */}
       <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border-primary bg-bg-secondary/80 backdrop-blur px-4 py-3">
         <button
@@ -585,7 +614,7 @@ export default function CategoryBrowsePage() {
         ) : (
           <div className="grid max-w-[1262px] mx-auto grid-cols-2 sm:grid-cols-3 md:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-3 max-sm:gap-2">
             {grid_items.map((file) => (
-              <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file.relative_path)} />
+              <MediaCard key={file.relative_path} file={file} on_click={() => open_media(file)} />
             ))}
           </div>
         )}

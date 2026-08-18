@@ -11,6 +11,9 @@ function make_callbacks(overrides?: Partial<GestureCallbacks>): GestureCallbacks
     on_seek: vi.fn(),
     on_seek_start: vi.fn(),
     on_seek_end: vi.fn(),
+    on_drag_start: vi.fn(),
+    on_drag_move: vi.fn(),
+    on_drag_end: vi.fn(),
     on_adjust_volume: vi.fn(),
     on_adjust_brightness: vi.fn(),
     on_adjust_end: vi.fn(),
@@ -45,6 +48,18 @@ function fake_wheel(deltaY: number): React.WheelEvent {
   } as unknown as React.WheelEvent;
 }
 
+function move_touch(x: number, y: number): React.TouchEvent {
+  return {
+    touches: [{ clientX: x, clientY: y } as Touch],
+  } as unknown as React.TouchEvent;
+}
+
+function end_touch(x: number, y: number): React.TouchEvent {
+  return {
+    changedTouches: [{ clientX: x, clientY: y } as Touch],
+  } as unknown as React.TouchEvent;
+}
+
 describe("usePlayerGestures", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -54,69 +69,120 @@ describe("usePlayerGestures", () => {
     vi.useRealTimers();
   });
 
-  it("calls on_swipe_next on upward vertical swipe", () => {
+  it("calls on_drag_move then on_drag_end('next') on upward vertical swipe", () => {
     const cb = make_callbacks();
     const { result } = renderHook(() => usePlayerGestures(cb));
 
     act(() => {
       result.current.handle_touch_start(fake_touch());
     });
-    // Simulate upward swipe
-    const evt = {
-      touches: [{ clientX: 110, clientY: 120 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_move(evt);
+      result.current.handle_touch_move(move_touch(110, 120));
     });
-    const end_evt = {
-      changedTouches: [{ clientX: 110, clientY: 120 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_end(end_evt);
+      result.current.handle_touch_end(end_touch(110, 120));
     });
 
-    expect(cb.on_swipe_next).toHaveBeenCalled();
+    expect(cb.on_drag_move).toHaveBeenCalledWith(-80);
+    expect(cb.on_drag_end).toHaveBeenCalledWith("next");
+    expect(cb.on_swipe_next).not.toHaveBeenCalled();
   });
 
-  it("calls on_swipe_prev on downward vertical swipe", () => {
+  it("calls on_drag_end('prev') on downward vertical swipe", () => {
     const cb = make_callbacks();
     const { result } = renderHook(() => usePlayerGestures(cb));
 
     act(() => {
       result.current.handle_touch_start(fake_touch());
     });
-    const evt = {
-      touches: [{ clientX: 110, clientY: 300 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_move(evt);
+      result.current.handle_touch_move(move_touch(110, 300));
     });
-    const end_evt = {
-      changedTouches: [{ clientX: 110, clientY: 300 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_end(end_evt);
+      result.current.handle_touch_end(end_touch(110, 300));
     });
 
-    expect(cb.on_swipe_prev).toHaveBeenCalled();
+    expect(cb.on_drag_move).toHaveBeenCalledWith(100);
+    expect(cb.on_drag_end).toHaveBeenCalledWith("prev");
   });
 
-  it("does not trigger swipe if moved less than threshold", () => {
+  it("does not trigger drag/swipe if moved less than deadzone", () => {
     const cb = make_callbacks();
     const { result } = renderHook(() => usePlayerGestures(cb));
 
     act(() => {
       result.current.handle_touch_start(fake_touch());
     });
-    const end_evt = {
-      changedTouches: [{ clientX: 105, clientY: 205 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_end(end_evt);
+      result.current.handle_touch_end(end_touch(105, 205));
     });
 
+    expect(cb.on_drag_move).not.toHaveBeenCalled();
+    expect(cb.on_drag_end).not.toHaveBeenCalled();
     expect(cb.on_swipe_next).not.toHaveBeenCalled();
     expect(cb.on_swipe_prev).not.toHaveBeenCalled();
+  });
+
+  it("fullscreen vertical swipe does NOT switch videos", () => {
+    const cb = make_callbacks({ is_fullscreen: () => true });
+    const { result } = renderHook(() => usePlayerGestures(cb));
+
+    Object.defineProperty(window, "innerWidth", { value: 400, writable: true });
+
+    act(() => {
+      result.current.handle_touch_start(fake_touch());
+    });
+    act(() => {
+      result.current.handle_touch_move(move_touch(110, 300));
+    });
+    act(() => {
+      result.current.handle_touch_end(end_touch(110, 300));
+    });
+
+    expect(cb.on_drag_move).not.toHaveBeenCalled();
+    expect(cb.on_drag_end).not.toHaveBeenCalled();
+    expect(cb.on_swipe_next).not.toHaveBeenCalled();
+  });
+
+  it("fullscreen left-half horizontal swipe adjusts brightness", () => {
+    const cb = make_callbacks({ is_fullscreen: () => true });
+    const { result } = renderHook(() => usePlayerGestures(cb));
+
+    Object.defineProperty(window, "innerWidth", { value: 400, writable: true });
+
+    act(() => {
+      result.current.handle_touch_start(fake_touch());
+    });
+    act(() => {
+      result.current.handle_touch_move(move_touch(50, 200)); // 左半屏 clientX 50 < 200
+    });
+    act(() => {
+      result.current.handle_touch_end(end_touch(50, 200));
+    });
+
+    expect(cb.on_adjust_brightness).toHaveBeenCalled();
+    expect(cb.on_adjust_volume).not.toHaveBeenCalled();
+    expect(cb.on_adjust_end).toHaveBeenCalled();
+  });
+
+  it("fullscreen right-half horizontal swipe adjusts volume", () => {
+    const cb = make_callbacks({ is_fullscreen: () => true });
+    const { result } = renderHook(() => usePlayerGestures(cb));
+
+    Object.defineProperty(window, "innerWidth", { value: 400, writable: true });
+
+    act(() => {
+      result.current.handle_touch_start(fake_touch());
+    });
+    act(() => {
+      result.current.handle_touch_move(move_touch(300, 200)); // 右半屏 clientX 300 > 200
+    });
+    act(() => {
+      result.current.handle_touch_end(end_touch(300, 200));
+    });
+
+    expect(cb.on_adjust_volume).toHaveBeenCalled();
+    expect(cb.on_adjust_brightness).not.toHaveBeenCalled();
   });
 
   it("starts long press timer on touch start", () => {
@@ -140,11 +206,8 @@ describe("usePlayerGestures", () => {
     act(() => {
       result.current.handle_touch_start(fake_touch());
     });
-    const evt = {
-      touches: [{ clientX: 120, clientY: 210 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_move(evt);
+      result.current.handle_touch_move(move_touch(120, 210));
     });
     act(() => {
       vi.advanceTimersByTime(500);
@@ -187,86 +250,19 @@ describe("usePlayerGestures", () => {
     expect(cb.on_toggle_controls).not.toHaveBeenCalled();
   });
 
-  it("calls on_seek on horizontal touch move in non-fullscreen", () => {
+  it("calls on_seek on horizontal touch move", () => {
     const cb = make_callbacks();
     const { result } = renderHook(() => usePlayerGestures(cb));
 
     act(() => {
       result.current.handle_touch_start(fake_touch());
     });
-    const evt = {
-      touches: [{ clientX: 150, clientY: 200 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_move(evt);
+      result.current.handle_touch_move(move_touch(150, 200));
     });
 
     expect(cb.on_seek_start).toHaveBeenCalled();
     expect(cb.on_seek).toHaveBeenCalledWith(50 / 5);
-  });
-
-  it("does not seek in fullscreen when dy > dx", () => {
-    const cb = make_callbacks({ is_fullscreen: () => true });
-    const { result } = renderHook(() => usePlayerGestures(cb));
-
-    act(() => {
-      result.current.handle_touch_start(fake_touch());
-    });
-    const evt = {
-      touches: [{ clientX: 110, clientY: 300 } as Touch],
-    } as unknown as React.TouchEvent;
-    act(() => {
-      result.current.handle_touch_move(evt);
-    });
-
-    // dy=100 > dx=10, should be volume or brightness, not seek
-    expect(cb.on_seek_start).not.toHaveBeenCalled();
-  });
-
-  it("in fullscreen left-half vertical swipe adjusts brightness", () => {
-    const cb = make_callbacks({ is_fullscreen: () => true });
-    const { result } = renderHook(() => usePlayerGestures(cb));
-
-    Object.defineProperty(window, "innerWidth", { value: 400, writable: true });
-
-    act(() => {
-      result.current.handle_touch_start({
-        touches: [{ clientX: 100, clientY: 200 } as Touch],
-        target: document.createElement("div"),
-      } as unknown as React.TouchEvent);
-    });
-    const move_evt = {
-      touches: [{ clientX: 110, clientY: 300 } as Touch],
-      target: document.createElement("div"),
-    } as unknown as React.TouchEvent;
-    act(() => {
-      result.current.handle_touch_move(move_evt);
-    });
-
-    expect(cb.on_adjust_brightness).toHaveBeenCalled();
-  });
-
-  it("in fullscreen right-half vertical swipe adjusts volume", () => {
-    const cb = make_callbacks({ is_fullscreen: () => true });
-    const { result } = renderHook(() => usePlayerGestures(cb));
-
-    Object.defineProperty(window, "innerWidth", { value: 400, writable: true });
-
-    act(() => {
-      result.current.handle_touch_start({
-        touches: [{ clientX: 300, clientY: 200 } as Touch],
-        target: document.createElement("div"),
-      } as unknown as React.TouchEvent);
-    });
-    const move_evt = {
-      touches: [{ clientX: 310, clientY: 300 } as Touch],
-      target: document.createElement("div"),
-    } as unknown as React.TouchEvent;
-    act(() => {
-      result.current.handle_touch_move(move_evt);
-    });
-
-    expect(cb.on_adjust_volume).toHaveBeenCalled();
   });
 
   it("wheel down calls on_swipe_next", () => {
@@ -298,13 +294,11 @@ describe("usePlayerGestures", () => {
     act(() => {
       result.current.handle_touch_start(fake_touch());
     });
-    const evt = {
-      touches: [{ clientX: 150, clientY: 200 } as Touch],
-    } as unknown as React.TouchEvent;
     act(() => {
-      result.current.handle_touch_move(evt);
+      result.current.handle_touch_move(move_touch(150, 200));
     });
 
     expect(cb.on_seek_start).not.toHaveBeenCalled();
+    expect(cb.on_drag_move).not.toHaveBeenCalled();
   });
 });

@@ -295,6 +295,8 @@ def _stream_video_file(filepath, range_header, mimetype, environ):
         'Accept-Ranges': 'bytes',
         'Content-Length': str(content_length),
         'Content-Type': mimetype,
+        # 让浏览器缓存已下载的分片，切回看过的视频时复用，减少重新下载（老设备）
+        'Cache-Control': 'public, max-age=600',
     }
     if has_range:
         headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'

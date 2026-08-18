@@ -34,6 +34,7 @@ Thumbs.db
 # App generated
 db_path/
 .ffmpeg/
+.pytest_cache/
 react/coverage/
 .coverage*
 coverage_py.json

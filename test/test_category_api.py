@@ -145,6 +145,22 @@ class TestCategoryData:
         assert info['total_categories'] == 0
         assert info['is_leaf'] is True
 
+    def test_new_subfolder_detected_without_refresh(self, client, temp_dir):
+        """缓存命中后新增子文件夹，再次请求也应检测到（无需点刷新/切模式）"""
+        self._seed_subfolders(temp_dir)
+        resp = client.get('/category/data')
+        info = resp.get_json()['data']
+        assert [c['name'] for c in info['categories']] == ['SubA', 'SubB']
+
+        # 新增一个子文件夹（含视频）
+        os.makedirs(os.path.join(temp_dir, 'SubC'))
+        _create_file(os.path.join(temp_dir, 'SubC', 'video9.mp4'))
+
+        # 不刷新、不重启，直接再次请求 → 应能检测到 SubC
+        resp2 = client.get('/category/data')
+        info2 = resp2.get_json()['data']
+        assert 'SubC' in [c['name'] for c in info2['categories']]
+
 
 class TestCategoryGridMore:
 

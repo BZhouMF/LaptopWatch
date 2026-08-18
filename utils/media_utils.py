@@ -57,6 +57,34 @@ def _get_sorted_subfolders(folder_path, conn=None):
         return []
 
 
+def _has_new_subfolders(folder_path, conn=None):
+    """检测文件系统上是否存在 DB 中还没有的直接子文件夹（1 层 scandir）。
+
+    发现新子文件夹时立即同步进 DB（这样分类列表能显示它及其内容），
+    返回 True，供 get_category_children_info 跳过缓存强制重建。
+    """
+    try:
+        from utils.db_utils import get_db, get_node_by_path, get_subfolder_nodes, sync_folder
+        if conn is None:
+            conn = get_db()
+        node = get_node_by_path(conn, str(folder_path))
+        if not node:
+            return False
+        db_names = {r['name'] for r in get_subfolder_nodes(conn, node['id'])}
+        try:
+            new_dirs = [e.path for e in os.scandir(folder_path)
+                        if e.is_dir(follow_symlinks=False) and e.name not in db_names]
+        except OSError:
+            return False
+        if not new_dirs:
+            return False
+        for sub_path in new_dirs:
+            sync_folder(conn, sub_path)
+        return True
+    except Exception:
+        return False
+
+
 def _format_file_item(f):
     """格式化单个文件项"""
     rel_path = f['rel_path']
@@ -206,8 +234,14 @@ def get_category_children_info(folder_path, run_mode, limit=None, random_mode=Fa
     # 检查缓存（非 refresh 路径，already_synced 为 set 说明不会重新 sync）
     cache_key = f"{rel_base}:{run_mode}:{random_mode}:{limit}"
     if already_synced is not None:
-        with _cache_lock:
-            cached = _category_info_cache.get(cache_key)
+        # 检测新文件夹：磁盘上有 DB 中还不存在的直接子文件夹时，跳过缓存强制重建
+        if _has_new_subfolders(folder_path, conn):
+            with _cache_lock:
+                _category_info_cache.pop(cache_key, None)
+            cached = None
+        else:
+            with _cache_lock:
+                cached = _category_info_cache.get(cache_key)
         if cached is not None:
             return cached
 

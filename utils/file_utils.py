@@ -10,6 +10,7 @@ from config import config
 _MIME_SUPPLEMENT = {
     '.m4v': 'video/mp4',
     '.mp4v': 'video/mp4',
+    '.mpv4': 'video/mp4',
     '.ogv': 'video/ogg',
     '.divx': 'video/x-msvideo',
     '.f4v': 'video/x-flv',
@@ -19,7 +20,9 @@ _MIME_SUPPLEMENT = {
     '.mts': 'video/mp2t',
     '.ts': 'video/mp2t',
     '.m2v': 'video/mpeg',
+    '.mpe': 'video/mpeg',
     '.mpv': 'video/mpeg',
+    '.rm': 'application/vnd.rn-realmedia',
     '.rmvb': 'application/vnd.rn-realmedia-vbr',
     '.vob': 'video/dvd',
     '.h264': 'video/h264',
@@ -28,15 +31,31 @@ _MIME_SUPPLEMENT = {
     '.265': 'video/hevc',
     '.mqv': 'video/quicktime',
     '.xvid': 'video/x-msvideo',
+    '.3g2': 'video/3gpp2',
+}
+
+# 图片扩展兜底映射（标准库未覆盖时）
+_IMAGE_MIME = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+    '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp',
+    '.tiff': 'image/tiff', '.tif': 'image/tiff',
 }
 
 
 def get_mime_type(filepath):
-    """获取文件的MIME类型，先尝试标准库，再使用补充映射"""
+    """获取文件的MIME类型，先尝试标准库，再使用补充映射。
+
+    已知媒体扩展绝不落回 application/octet-stream（否则浏览器会下载而非播放）。
+    """
     mime_type, _ = mimetypes.guess_type(filepath)
     if mime_type is None:
         ext = os.path.splitext(filepath)[1].lower()
-        mime_type = _MIME_SUPPLEMENT.get(ext, 'application/octet-stream')
+        if ext in config.VIDEO_EXT:
+            mime_type = _MIME_SUPPLEMENT.get(ext, 'video/mp4')
+        elif ext in config.IMAGE_EXT:
+            mime_type = _IMAGE_MIME.get(ext, 'image/jpeg')
+        else:
+            mime_type = _MIME_SUPPLEMENT.get(ext, 'application/octet-stream')
     return mime_type
 
 
