@@ -39,7 +39,7 @@ interface GridEntry {
   folder_name: string;
   parent_path: string;
   current_page: number;
-  page_cache: Record<number, { items: MediaItem[]; has_more: boolean }>;
+  page_cache: Record<number, { items: MediaItem[]; has_more: boolean; error?: boolean }>;
   page_first: number;
   page_load: number;
 }
@@ -370,9 +370,16 @@ export default function CategoryBrowsePage() {
           };
           entry.current_page = page;
           set_nav_stack((prev) => [...prev]);
+        } else {
+          // 后端返回非 0：填充错误页，避免永久转圈
+          entry.page_cache[page] = { items: [], has_more: false, error: true };
+          set_nav_stack((prev) => [...prev]);
         }
       } catch (err: unknown) {
         if ((err as Error).name === "AbortError" || (err as Error).name === "CanceledError") return;
+        // 请求失败（网络/500）：填充错误页 + 重试入口，绝不永久转圈
+        entry.page_cache[page] = { items: [], has_more: false, error: true };
+        set_nav_stack((prev) => [...prev]);
       }
     },
     []
@@ -383,6 +390,14 @@ export default function CategoryBrowsePage() {
       grid_load_page(current_entry, current_entry.current_page);
     }
   }, [current_entry]);
+
+  // 重试当前页：清除错误标记后重新加载
+  const retry_grid_page = useCallback(() => {
+    if (!current_entry || current_entry.view !== "grid") return;
+    delete current_entry.page_cache[current_entry.current_page];
+    set_nav_stack((prev) => [...prev]);
+    grid_load_page(current_entry, current_entry.current_page);
+  }, [current_entry, grid_load_page]);
 
   // 返回到分类视图时恢复之前保存的滚动位置
   useLayoutEffect(() => {
@@ -395,12 +410,14 @@ export default function CategoryBrowsePage() {
     (page: number) => {
       if (!current_entry || current_entry.view !== "grid") return;
       if (current_entry.current_page === page) return;
-      // 立即切换当前页（先显示加载态），数据由下方 useEffect 按需加载。
-      // 翻页不再等待网络请求完成，也不受本页封面加载影响。
+      // 立即切换当前页（先显示加载态），再主动拉取该页数据。
+      // 注意不能只依赖 useEffect：current_entry 是 nav_stack 中同一个对象
+      // 引用，翻页后其引用不变，[current_entry] 依赖的 effect 不会触发。
       current_entry.current_page = page;
       set_nav_stack((prev) => [...prev]);
+      grid_load_page(current_entry, page);
     },
-    [current_entry]
+    [current_entry, grid_load_page]
   );
 
   // 视频/图片统一进入 /media/player 页：<video> 内嵌播放。
@@ -603,6 +620,22 @@ export default function CategoryBrowsePage() {
       <div className="flex-1 overflow-auto p-4">
         {grid_items.length === 0 && !grid_page ? (
           <Spinner />
+        ) : grid_page?.error ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-bg-card border border-border-primary">
+              <svg className="h-8 w-8 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p className="text-text-muted">加载失败</p>
+            <button
+              onClick={retry_grid_page}
+              className="rounded-lg border border-border-primary px-4 py-1.5 text-xs font-medium text-text-secondary transition hover:bg-bg-card-hover hover:text-text-primary"
+            >
+              重试
+            </button>
+          </div>
         ) : grid_items.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-bg-card border border-border-primary">

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import CategoryBrowsePage from "../pages/CategoryBrowsePage";
+import api_client from "../api/client";
 
 function make_media(prefix: string, count: number) {
   return Array.from({ length: count }, (_, i) => ({
@@ -40,7 +41,7 @@ const sub_data = {
 
 vi.mock("../api/client", () => ({
   default: {
-    get: vi.fn((url: string, opts?: { params?: { path?: string } }) => {
+    get: vi.fn((url: string, opts?: { params?: { path?: string; offset?: number; limit?: number } }) => {
       if (url === "/api/mode") {
         return Promise.resolve({ data: { page_first: 28, page_load: 28 } });
       }
@@ -49,7 +50,11 @@ vi.mock("../api/client", () => ({
         return Promise.resolve({ data: path ? sub_data : root_data });
       }
       if (url === "/category/grid_more") {
-        return Promise.resolve({ data: { code: 0, data: sub_data.data.root_files, has_more: false } });
+        const offset = opts?.params?.offset ?? 0;
+        if (offset === 0) {
+          return Promise.resolve({ data: { code: 0, data: make_media("p1", 28), has_more: true } });
+        }
+        return Promise.resolve({ data: { code: 0, data: make_media("p2", 5), has_more: false } });
       }
       return Promise.reject(new Error("unknown"));
     }),
@@ -104,5 +109,62 @@ describe("CategoryBrowsePage", () => {
     await waitFor(() => {
       expect(window.scrollTo).toHaveBeenCalledWith(0, 500);
     });
+  });
+
+  it("grid 分页：点击下一页能加载并显示第2页内容（不卡转圈）", async () => {
+    render(
+      <MemoryRouter>
+        <CategoryBrowsePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("根目录")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("显示更多"));
+
+    // 第1页加载完成（出现分页栏）
+    await waitFor(() => {
+      expect(screen.getByText("下一页")).toBeDefined();
+    });
+    expect(screen.getByText("p10.jpg")).toBeDefined();
+
+    // 点击下一页 → 第2页内容出现，不卡在 spinner
+    fireEvent.click(screen.getByText("下一页"));
+    await waitFor(() => {
+      expect(screen.getByText("p20.jpg")).toBeDefined();
+    });
+    expect(screen.queryByText("p10.jpg")).toBeNull();
+  });
+
+  it("grid 分页：请求失败时显示错误与重试，而不是永久转圈", async () => {
+    render(
+      <MemoryRouter>
+        <CategoryBrowsePage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("根目录")).toBeDefined();
+    });
+    fireEvent.click(screen.getByText("显示更多"));
+    await waitFor(() => {
+      expect(screen.getByText("下一页")).toBeDefined();
+    });
+
+    // 让第2页请求失败一次
+    vi.mocked(api_client.get).mockImplementationOnce((url, opts) => {
+      if (url === "/category/grid_more") {
+        return Promise.reject(new Error("network error"));
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    fireEvent.click(screen.getByText("下一页"));
+    // 修复后应显示"加载失败"与重试按钮，而非一直转圈
+    await waitFor(() => {
+      expect(screen.getByText(/加载失败/)).toBeDefined();
+    });
+    expect(screen.getByText(/重试/)).toBeDefined();
   });
 });
