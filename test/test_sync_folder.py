@@ -203,3 +203,53 @@ class TestSyncFolderCascadeDelete:
         assert _node_id(conn, vid) is None
         # media 表中的 clip.mp4 也应级联删除
         assert vid not in _media_paths(conn, sub)
+
+
+class TestCoverLazyGeneration:
+    """封面懒生成：同步路径不再生成封面，由 generate_and_cache_cover 按需生成"""
+
+    def test_sync_does_not_generate_image_cover(self, conn, temp_dir):
+        """同步图片后 media.cover 为 NULL，等待懒生成（本次优化行为）"""
+        try:
+            from PIL import Image
+        except ImportError:
+            pytest.skip('PIL not available')
+        img_path = os.path.join(temp_dir, 'pic.jpg')
+        Image.new('RGB', (50, 50), 'red').save(img_path)
+
+        sync_folder(conn, temp_dir)
+        row = conn.execute("SELECT cover FROM media WHERE path=?", (img_path,)).fetchone()
+        assert row is not None
+        assert row[0] is None  # 同步路径不生成封面
+
+    def test_cover_generated_on_demand_and_cached(self, conn, temp_dir):
+        """generate_and_cache_cover 按需生成并写入 DB 缓存，二次调用命中缓存"""
+        try:
+            from PIL import Image
+        except ImportError:
+            pytest.skip('PIL not available')
+        img_path = os.path.join(temp_dir, 'pic.jpg')
+        Image.new('RGB', (50, 50), 'red').save(img_path)
+        sync_folder(conn, temp_dir)
+
+        from utils.db_utils import generate_and_cache_cover
+        jpeg, mime = generate_and_cache_cover(conn, img_path)
+        assert jpeg is not None
+        assert mime == 'image/jpeg'
+        # 已写入缓存
+        row = conn.execute("SELECT cover FROM media WHERE path=?", (img_path,)).fetchone()
+        assert row[0] == jpeg
+        # 再次调用直接命中缓存（返回相同数据）
+        jpeg2, _ = generate_and_cache_cover(conn, img_path)
+        assert jpeg2 == jpeg
+
+    def test_video_cover_not_pregenerated(self, conn, temp_dir):
+        """视频封面同样不预生成（同步后 cover 为 NULL，首次缩略图请求时懒生成）"""
+        video_path = os.path.join(temp_dir, 'clip.mp4')
+        with open(video_path, 'wb') as f:
+            f.write(b'\x00' * 1024)
+
+        sync_folder(conn, temp_dir)
+        row = conn.execute("SELECT cover FROM media WHERE path=?", (video_path,)).fetchone()
+        assert row is not None
+        assert row[0] is None

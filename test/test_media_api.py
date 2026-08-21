@@ -196,3 +196,59 @@ class TestServeMedia:
         assert resp2.status_code == 206
         assert resp2.headers.get('Cache-Control') == 'public, max-age=600'
         assert resp2.headers.get('Content-Range') == 'bytes 0-1023/2048'
+
+
+class TestRandomSyncThrottle:
+    """随机模式根目录同步节流（media_api._maybe_sync_random_root）：30 秒内不重复 sync"""
+
+    def test_throttles_within_interval(self, monkeypatch):
+        """30 秒内的第二次调用跳过同步"""
+        import time as _time
+        import sqlite3
+        import blueprints.media_api as media_api
+
+        calls = []
+        monkeypatch.setattr('utils.db_utils.sync_folder',
+                            lambda conn, path: calls.append(path))
+        # 重置节流时间戳为"很久以前"，确保首次必然触发
+        monkeypatch.setattr(media_api, '_last_random_root_sync_ts', 0.0)
+
+        conn = sqlite3.connect(':memory:')
+        media_api._maybe_sync_random_root(conn)
+        assert len(calls) == 1  # 第一次触发同步
+
+        media_api._maybe_sync_random_root(conn)
+        assert len(calls) == 1  # 30 秒内第二次 → 跳过，不产生额外 IO
+
+    def test_resync_after_interval(self, monkeypatch):
+        """超过 30 秒后再次调用重新同步"""
+        import time as _time
+        import sqlite3
+        import blueprints.media_api as media_api
+
+        calls = []
+        monkeypatch.setattr('utils.db_utils.sync_folder',
+                            lambda conn, path: calls.append(path))
+        monkeypatch.setattr(media_api, '_last_random_root_sync_ts', 0.0)
+
+        conn = sqlite3.connect(':memory:')
+        media_api._maybe_sync_random_root(conn)
+        assert len(calls) == 1
+
+        # 模拟 31 秒过去
+        monkeypatch.setattr(media_api, '_last_random_root_sync_ts', _time.time() - 31)
+        media_api._maybe_sync_random_root(conn)
+        assert len(calls) == 2  # 超过间隔 → 重新同步
+
+    def test_timestamp_updated_after_sync(self, monkeypatch):
+        """同步后节流时间戳被更新为当前时间"""
+        import time as _time
+        import sqlite3
+        import blueprints.media_api as media_api
+
+        monkeypatch.setattr('utils.db_utils.sync_folder', lambda conn, path: None)
+        monkeypatch.setattr(media_api, '_last_random_root_sync_ts', 0.0)
+
+        conn = sqlite3.connect(':memory:')
+        media_api._maybe_sync_random_root(conn)
+        assert _time.time() - media_api._last_random_root_sync_ts < 5
