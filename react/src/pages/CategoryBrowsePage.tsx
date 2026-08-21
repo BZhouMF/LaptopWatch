@@ -403,19 +403,18 @@ export default function CategoryBrowsePage() {
     [current_entry]
   );
 
-  // 视频点击直接交给浏览器原生播放器（返回时从 sessionStorage 恢复浏览栈），图片仍进入自写播放器页
+  // 视频/图片统一进入 /media/player 页：<video> 内嵌播放。
+  // 不能用 window.location.href 顶层导航到视频 URL —— 浏览器对无法解码的
+  // 格式（rmvb/HEVC/部分 mkv/avi 等）会退化为下载；内嵌 <video> 则只会
+  // 显示播放错误，绝不会下载。（返回时从 sessionStorage 恢复浏览栈）
   const open_media = useCallback(
     (file: MediaItem) => {
       save_current_scroll();
       sessionStorage.setItem(RETURNING_KEY, "1");
       save_stack(nav_stack_ref.current, current_index_ref.current);
-      if (file.is_video) {
-        window.location.href = `/media/serve_media/${encodeURIComponent(file.relative_path)}`;
-      } else {
-        navigate(`/media/player?path=${encodeURIComponent(file.relative_path)}`);
-      }
+      navigate(`/media/player?path=${encodeURIComponent(file.relative_path)}`);
     },
-    [save_stack, save_current_scroll]
+    [save_stack, save_current_scroll, navigate]
   );
 
   // ── Render helpers ───────────────────────────────────
