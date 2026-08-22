@@ -14,6 +14,28 @@ from flask import session, request
 from config import config
 from utils.cache_utils import cache_manager
 
+# 是否通过 GUI 启动（GUI 会捕获子进程 stdout 显示在日志面板/推送 QID）
+_IS_GUI = os.environ.get('LAPTOPWATCH_GUI_LAUNCH') == '1'
+
+# 需要在控制台/GUI 面板显示的活动 action（非 GUI 模式由 console handler 统一输出，
+# 这里只作为 GUI 模式的 stdout 补充；高频/无分析价值的动作不在此列）
+_CONSOLE_ACTIONS = frozenset({
+    # 页面/认证
+    'INDEX', 'BROWSE', 'LOGIN', 'LOGOUT', 'REGISTER',
+    # 文件操作
+    'DOWNLOAD', 'DOWNLOAD_ABS', 'DOWNLOAD_MEDIA', 'DOWNLOAD_FOLDER', 'DOWNLOAD_SELECTED',
+    'FILE_VIEW', 'FILE_TEXT', 'RAW_PREVIEW', 'RAW_PREVIEW_ABS',
+    # 媒体浏览
+    'LOAD_MORE', 'MEDIA_NAV', 'MEDIA_PLAY', 'MEDIA_VIEW',
+    'DOUYIN_INIT', 'DOUYIN_NEXT',
+    # 目录浏览模式
+    'CATEGORY_DATA', 'CATEGORY_GRID_MORE', 'CATEGORY_BROWSE', 'CATEGORY_GRID',
+    # 普通文件模式
+    'API_LIST', 'LIST_ALL', 'CHECK_PATH',
+    # 管理
+    'ADMIN_CONFIG', 'ADMIN_STATUS', 'ADMIN_START', 'ADMIN_STOP', 'ADMIN_KILL_ALL',
+})
+
 def _safe_print(*args, **kwargs):
     """安全打印，处理 Windows 控制台输出异常"""
     try:
@@ -60,13 +82,11 @@ def setup_logging():
     # 清除默认处理器
     root_logger.handlers.clear()
 
-    # 检查是否通过 GUI 启动（通过环境变量判断）
-    is_gui_launch = os.environ.get('LAPTOPWATCH_GUI_LAUNCH') == '1'
-
-    # 控制台处理器（GUI模式只输出WARNING及以上级别，非GUI模式输出全部）
+    # 控制台处理器（GUI模式只输出WARNING及以上级别，活动日志由 stdout 补充；
+    # 非GUI模式输出全部日志到终端）
     console_handler = logging.StreamHandler()
-    if is_gui_launch:
-        # GUI模式：只输出警告和错误，避免过多日志阻塞GUI
+    if _IS_GUI:
+        # GUI模式：只输出警告和错误，避免过多日志刷屏
         console_handler.setLevel(logging.WARNING)
     else:
         console_handler.setLevel(config.LOG_LEVEL)
@@ -153,15 +173,14 @@ def log_access(request_obj, action, path, details='', duration=0):
     if duration > 0:
         log_msg += f" | 耗时: {duration:.3f}s"
 
-    # 记录日志
+    # 记录日志（非 GUI 模式：console handler 直接输出到终端；
+    # GUI 模式：console handler 只输出 WARNING+，活动日志走下方 stdout）
     logger = logging.getLogger(__name__)
     logger.info(log_msg, extra={'context': context})
 
-    # 仅对用户主动操作输出到 stdout（GUI 用此信息显示实时活动）
-    if action in ('INDEX', 'BROWSE', 'LOGIN', 'LOGOUT',
-                  'DOWNLOAD', 'DOWNLOAD_MEDIA', 'DOWNLOAD_FOLDER', 'DOWNLOAD_SELECTED',
-                  'LOAD_MORE', 'MEDIA_NAV', 'MEDIA_PLAY', 'MEDIA_VIEW',
-                  'DOUYIN_INIT', 'DOUYIN_NEXT'):
+    # 活动日志输出到 stdout：GUI 模式由 GUI 面板捕获/推送 QID，
+    # 非 GUI 模式由 console handler 负责显示，这里不重复打印
+    if _IS_GUI and action in _CONSOLE_ACTIONS:
         _safe_print(f"[ACCESS][{action}] {log_msg}", flush=True)
 
 
@@ -183,8 +202,9 @@ def log_exception(request_obj, action, path, exc: Exception):
         extra={'context': context},
         exc_info=True
     )
-    # 同时输出到标准输出，确保GUI能捕获到错误信息
-    _safe_print(f"[ERROR] {error_msg}", flush=True)
+    # 同时输出到标准输出，确保 GUI 能捕获到错误信息（非 GUI 模式由 console handler 负责显示）
+    if _IS_GUI:
+        _safe_print(f"[ERROR] {error_msg}", flush=True)
 
 # 创建模块级logger
 logger = logging.getLogger(__name__)

@@ -205,3 +205,52 @@ class TestTeardown:
     def test_teardown_funcs_is_dict(self, test_app):
         """验证 teardown_request_funcs 存在"""
         assert hasattr(test_app, 'teardown_request_funcs')
+
+
+class TestRequestLogging:
+    """请求日志（app.py log_incoming_request）：走 logging 体系落文件，非 GUI 不重复刷 stdout"""
+
+    def test_request_log_written_via_logging(self, tmp_path, monkeypatch, capsys):
+        """[REQUEST] 日志经过 logging 体系（可被文件 handler 捕获），非 GUI 模式不 print"""
+        import logging as _logging
+        from config import config as _config
+
+        monkeypatch.setattr(_config, 'LOG_DIR', tmp_path)
+        monkeypatch.setattr('utils.logging_utils._IS_GUI', False)
+
+        root = _logging.getLogger()
+        original_handlers = list(root.handlers)
+        original_level = root.level
+        try:
+            import app as app_module  # 顶层会执行 setup_logging()
+
+            # 测试环境 conftest 把 LOG_LEVEL 设为 CRITICAL，临时降到 INFO 以便捕获
+            root.setLevel(_logging.INFO)
+
+            # 追加捕获 handler，验证 [REQUEST] 确实经过 logging 体系
+            records = []
+
+            class Capture(_logging.Handler):
+                def emit(self, record):
+                    records.append(record.getMessage())
+
+            capture = Capture()
+            capture.setLevel(_logging.INFO)
+            root.addHandler(capture)
+
+            # /api/config-version 是服务门控白名单，请求必然到达 log_incoming_request
+            app_module.config.SERVICE_ACTIVE = True
+            with app_module.app.test_client() as c:
+                with c.session_transaction() as sess:
+                    sess['logged_in'] = True
+                c.get('/api/config-version')
+
+            assert any('[REQUEST]' in r for r in records), "REQUEST 日志未经过 logging"
+            # 非 GUI 模式：不额外 print（避免与 console handler 重复）
+            out = capsys.readouterr().out
+            assert '[REQUEST]' not in out
+        finally:
+            root.handlers.clear()
+            for h in original_handlers:
+                root.addHandler(h)
+            root.setLevel(original_level)

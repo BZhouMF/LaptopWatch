@@ -109,14 +109,19 @@ _SILENT_PREFIXES = ('/static/', '/favicon.ico', '/media/thumbnail/', '/media/nav
 
 @app.before_request
 def log_incoming_request():
-    """记录到达的请求，静默跳过无分析价值的请求"""
+    """记录到达的请求（写入日志文件 + 控制台），静默跳过无分析价值的请求"""
     from flask import request
-    from utils.logging_utils import _safe_print
+    from utils.logging_utils import logger, _safe_print, _IS_GUI
     if 'Range' in request.headers:
         return
     if request.path.startswith(_SILENT_PREFIXES):
         return
-    _safe_print(f"[REQUEST] {request.remote_addr} -> {request.method} {request.path}")
+    msg = f"[REQUEST] {request.remote_addr} -> {request.method} {request.path}"
+    # 非 GUI 模式：console handler 输出到终端；GUI 模式：console handler 仅 WARNING+，
+    # 由 stdout 补充（GUI 面板捕获显示）
+    logger.info(msg)
+    if _IS_GUI:
+        _safe_print(msg, flush=True)
 
 # 注入前端路由常量到所有模板
 from routes_config import FRONTEND_ROUTES
@@ -181,8 +186,11 @@ def handle_unhandled_exception(e):
 
     logger.error(error_msg, exc_info=True)
     tb = traceback.format_exc()
-    _safe_print(f"[ERROR] {error_msg}", flush=True)
-    _safe_print(tb, flush=True)
+    # stdout 输出供 GUI 面板捕获（非 GUI 模式由 console handler 显示，避免重复）
+    from utils.logging_utils import _IS_GUI
+    if _IS_GUI:
+        _safe_print(f"[ERROR] {error_msg}", flush=True)
+        _safe_print(tb, flush=True)
 
     # 同时写入日志文件确保不丢失
     try:
@@ -260,4 +268,5 @@ if __name__ == '__main__':
     print(f"LaptopWatch 启动中... 模式: {config.RUN_MODE}")
     print(f"  Flask  (页面/API): http://0.0.0.0:{port}")
     print(f"  FastAPI (视频流):  http://0.0.0.0:{config.VIDEO_SERVE_PORT}")
+    logger.info(f"服务启动完成: Flask :{port} + FastAPI :{config.VIDEO_SERVE_PORT} (模式: {config.RUN_MODE})")
     serve(app, host='0.0.0.0', port=port, threads=64)

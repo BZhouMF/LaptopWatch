@@ -165,3 +165,77 @@ class TestSetupLogging:
             for h in original_handlers:
                 root.addHandler(h)
             root.setLevel(original_level)
+
+
+class TestConsoleActions:
+    """控制台活动日志：覆盖范围、GUI/非 GUI 模式行为"""
+
+    def test_console_actions_cover_business_actions(self):
+        """控制台 action 覆盖全部业务动作"""
+        from utils.logging_utils import _CONSOLE_ACTIONS
+        for action in (
+            'INDEX', 'BROWSE', 'LOGIN', 'LOGOUT', 'REGISTER',
+            'DOWNLOAD', 'DOWNLOAD_MEDIA', 'DOWNLOAD_FOLDER', 'DOWNLOAD_SELECTED',
+            'LOAD_MORE', 'MEDIA_NAV', 'MEDIA_PLAY', 'MEDIA_VIEW',
+            'DOUYIN_INIT', 'DOUYIN_NEXT',
+            'CATEGORY_DATA', 'CATEGORY_GRID_MORE', 'CATEGORY_BROWSE', 'CATEGORY_GRID',
+            'API_LIST', 'LIST_ALL', 'CHECK_PATH', 'FILE_VIEW', 'FILE_TEXT',
+        ):
+            assert action in _CONSOLE_ACTIONS, f"action 未覆盖: {action}"
+
+    def test_non_gui_mode_does_not_duplicate_stdout(self, capsys, monkeypatch):
+        """非 GUI 模式：活动日志由 console handler 输出，log_access 不重复 print"""
+        from utils.logging_utils import log_access
+        from unittest.mock import Mock
+        monkeypatch.setattr('utils.logging_utils._IS_GUI', False)
+        req = Mock()
+        req.remote_addr = '127.0.0.1'
+        log_access(req, 'BROWSE', '/test', duration=0.001)
+        captured = capsys.readouterr()
+        assert '[ACCESS]' not in captured.out
+
+    def test_gui_mode_prints_console_actions_to_stdout(self, capsys, monkeypatch):
+        """GUI 模式：活动日志输出到 stdout（GUI 面板捕获显示）"""
+        from utils.logging_utils import log_access
+        from unittest.mock import Mock
+        monkeypatch.setattr('utils.logging_utils._IS_GUI', True)
+        req = Mock()
+        req.remote_addr = '127.0.0.1'
+        log_access(req, 'BROWSE', '/test', duration=0.001)
+        captured = capsys.readouterr()
+        assert '[ACCESS][BROWSE]' in captured.out
+        assert '127.0.0.1' in captured.out
+
+    def test_gui_mode_skips_high_frequency_actions(self, capsys, monkeypatch):
+        """GUI 模式：高频动作（如缩略图）不刷屏 stdout"""
+        from utils.logging_utils import log_access
+        from unittest.mock import Mock
+        monkeypatch.setattr('utils.logging_utils._IS_GUI', True)
+        req = Mock()
+        req.remote_addr = '127.0.0.1'
+        log_access(req, 'THUMBNAIL', '/test', duration=0.001)
+        captured = capsys.readouterr()
+        assert '[ACCESS]' not in captured.out
+
+    def test_gui_mode_prints_exception_to_stdout(self, capsys, monkeypatch):
+        """GUI 模式：异常日志始终输出到 stdout"""
+        from utils.logging_utils import log_exception
+        from unittest.mock import Mock
+        monkeypatch.setattr('utils.logging_utils._IS_GUI', True)
+        req = Mock()
+        req.remote_addr = '127.0.0.1'
+        log_exception(req, 'BROWSE', '/test', ValueError('boom'))
+        captured = capsys.readouterr()
+        assert '[ERROR]' in captured.out
+        assert 'boom' in captured.out
+
+    def test_non_gui_mode_exception_not_duplicated(self, capsys, monkeypatch):
+        """非 GUI 模式：异常日志由 console handler 输出，stdout 不重复 print"""
+        from utils.logging_utils import log_exception
+        from unittest.mock import Mock
+        monkeypatch.setattr('utils.logging_utils._IS_GUI', False)
+        req = Mock()
+        req.remote_addr = '127.0.0.1'
+        log_exception(req, 'BROWSE', '/test', ValueError('boom'))
+        captured = capsys.readouterr()
+        assert '[ERROR]' not in captured.out
