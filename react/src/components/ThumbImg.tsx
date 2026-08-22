@@ -19,6 +19,8 @@ export default function ThumbImg({ src, alt, className }: ThumbImgProps) {
 
   useEffect(() => {
     let alive = true;
+    // 当前已开始任务的槽位释放函数（任务开始时由调度器注入）
+    let release: (() => void) | null = null;
     setThumbSrc(undefined);
     doneRef.current = () => {};
     const cancel = queueThumbnail((markDone) => {
@@ -26,12 +28,19 @@ export default function ThumbImg({ src, alt, className }: ThumbImgProps) {
         markDone();
         return;
       }
+      release = markDone;
       doneRef.current = markDone;
       setThumbSrc(src);
     });
     return () => {
       alive = false;
       cancel();
+      // 关键：任务已开始（图片还在加载）时，卸载/换 src 也要释放调度槽位。
+      // 否则已开始但未 onLoad 的请求会让槽位永久占用，后续封面全部排不上队。
+      if (release) {
+        doneRef.current = () => {};
+        release();
+      }
     };
   }, [src]);
 

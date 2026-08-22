@@ -88,4 +88,34 @@ describe("ThumbImg", () => {
     releases[2]();
     releases[3]();
   });
+
+  it("卸载时释放已开始任务的槽位，后续排队任务得以执行（封面不显示的修复）", async () => {
+    const releases: Array<() => void> = [];
+    for (let i = 0; i < 4; i++) {
+      queueThumbnail((markDone) => {
+        releases.push(markDone);
+      });
+    }
+
+    const { unmount } = render(<ThumbImg src="/media/thumbnail/a.jpg" alt="a" />);
+    const img = screen.getByRole("img") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBeFalsy();
+
+    // 释放一个槽位 → ThumbImg 任务开始（src 已设置，但图片尚未 onLoad）
+    releases[0]();
+    await waitFor(() => {
+      expect(img.getAttribute("src")).toBe("/media/thumbnail/a.jpg");
+    });
+
+    // 模拟翻页/切换视图：组件卸载但图片还在加载中
+    // 若槽位不释放，后续所有封面将永远排不上队（bug）
+    unmount();
+
+    // 修复后：已开始任务的槽位被释放 → 新任务立即开始
+    let next_started = 0;
+    queueThumbnail(() => {
+      next_started++;
+    });
+    expect(next_started).toBe(1);
+  });
 });
