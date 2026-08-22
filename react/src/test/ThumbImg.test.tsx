@@ -12,6 +12,46 @@ describe("ThumbImg", () => {
     __resetThumbnailQueue();
   });
 
+  it("已加载过的封面重新挂载时直接显示，不排队不闪烁", async () => {
+    // 第一次挂载并加载成功（onLoad 标记为已加载）
+    const first = render(<ThumbImg src="/media/thumbnail/a.jpg" alt="a" />);
+    const img = screen.getByRole("img") as HTMLImageElement;
+    await waitFor(() => {
+      expect(img.getAttribute("src")).toBe("/media/thumbnail/a.jpg");
+    });
+    fireEvent.load(img);
+    first.unmount();
+
+    // 调度器 4 个槽位全部被占满（模拟繁忙）
+    const releases: Array<() => void> = [];
+    for (let i = 0; i < 4; i++) {
+      queueThumbnail((markDone) => {
+        releases.push(markDone);
+      });
+    }
+
+    // 重新挂载同一 src（模拟从"显示更多"返回分类视图）：
+    // 已加载过的封面直接显示，即使调度器槽位全满也无需排队
+    render(<ThumbImg src="/media/thumbnail/a.jpg" alt="a" />);
+    const img2 = screen.getByRole("img") as HTMLImageElement;
+    expect(img2.getAttribute("src")).toBe("/media/thumbnail/a.jpg");
+  });
+
+  it("未加载过的封面仍受调度器控制", async () => {
+    // 占满 4 槽
+    const releases: Array<() => void> = [];
+    for (let i = 0; i < 4; i++) {
+      queueThumbnail((markDone) => {
+        releases.push(markDone);
+      });
+    }
+
+    // 从未加载过的新 src → 排队等待
+    render(<ThumbImg src="/media/thumbnail/new.jpg" alt="new" />);
+    const img = screen.getByRole("img") as HTMLImageElement;
+    expect(img.getAttribute("src")).toBeFalsy();
+  });
+
   it("有空闲槽位时立即设置 src", () => {
     render(<ThumbImg src="/media/thumbnail/a.jpg" alt="a" />);
     const img = screen.getByRole("img") as HTMLImageElement;

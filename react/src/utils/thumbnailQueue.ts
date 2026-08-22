@@ -52,8 +52,30 @@ export function queueThumbnail(onStart: (markDone: () => void) => void): () => v
   };
 }
 
+// ── 已加载封面缓存 ──────────────────────────────────────
+// 本会话内加载成功的缩略图 src 集合：重新挂载（返回视图/翻回原页）时
+// 直接设置 src（浏览器 HTTP 缓存命中秒显示），不再排队等待调度器，
+// 避免"返回后封面重新加载一次"的闪烁。
+
+const loadedThumbnails = new Set<string>();
+const MAX_LOADED_THUMBNAILS = 2000;
+
+/** 记录一次成功加载的封面 src */
+export function markThumbnailLoaded(src: string): void {
+  if (loadedThumbnails.size >= MAX_LOADED_THUMBNAILS) {
+    loadedThumbnails.clear();
+  }
+  loadedThumbnails.add(src);
+}
+
+/** 该封面 src 本次会话内是否已成功加载过 */
+export function isThumbnailLoaded(src: string): boolean {
+  return loadedThumbnails.has(src);
+}
+
 /** 仅供测试使用：重置调度器状态。 */
 export function __resetThumbnailQueue(): void {
   pending.length = 0;
   inFlight = 0;
+  loadedThumbnails.clear();
 }
