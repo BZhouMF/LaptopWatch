@@ -82,6 +82,7 @@ class TestApiMode:
         assert 'random_mode' in data
         assert 'page_first' in data
         assert 'page_load' in data
+        assert 'video_port' in data  # 媒体流服务端口（前端据此指向 FastAPI 5003）
 
 
 class TestFavicon:

@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import api_client from "../api/client";
 import PreviewModal from "../components/browse/PreviewModal";
 import SelectionBar from "../components/browse/SelectionBar";
+import { mediaServeUrl } from "../utils/mediaUrl";
 
 const MAX_HISTORY = 20;
 const LOAD_LIMIT = 20;
@@ -567,7 +568,7 @@ export default function BrowsePage() {
                       if (selection_mode) {
                         toggle_select_item(file.path);
                       } else if (file.is_previewable) {
-                        const media_url = `/media/serve_media/${encodeURIComponent(file.path)}`;
+                        const media_url = mediaServeUrl(file.path);
                         const download_url = `/media/download_media/${encodeURIComponent(file.path)}`;
                         open_preview(media_url, file.name, file.is_video, download_url);
                       } else if (file.is_text_readable) {
@@ -621,7 +622,7 @@ export default function BrowsePage() {
                     if (selection_mode) {
                       toggle_select_item(file.path);
                     } else if (file.is_previewable) {
-                      const media_url = `/media/serve_media/${encodeURIComponent(file.path)}`;
+                      const media_url = mediaServeUrl(file.path);
                       const download_url = `/media/download_media/${encodeURIComponent(file.path)}`;
                       open_preview(media_url, file.name, file.is_video, download_url);
                     } else if (file.is_text_readable) {

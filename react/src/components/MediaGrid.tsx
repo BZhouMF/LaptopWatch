@@ -116,13 +116,10 @@ export default function MediaGrid({ page_first, page_load, is_random }: MediaGri
     if (has_more && !is_loading) load_page(current_page + 1);
   }, [current_page, has_more, is_loading, load_page]);
 
-  // 视频点击直接交给浏览器原生播放器，图片仍进入自写播放器页
+  // 视频/图片统一进入 /media/player 页内嵌播放，避免顶层导航到媒体 URL
+  // 触发浏览器对不兼容格式（rmvb/HEVC/avi 等）的下载
   const open_player = useCallback((item: MediaItem) => {
-    if (item.is_video) {
-      window.location.href = `/media/serve_media/${encodeURIComponent(item.relative_path)}`;
-    } else {
-      window.location.href = `/media/player?path=${encodeURIComponent(item.relative_path)}`;
-    }
+    window.location.href = `/media/player?path=${encodeURIComponent(item.relative_path)}`;
   }, []);
 
   const visible_pages = (): (number | "dots")[] => {

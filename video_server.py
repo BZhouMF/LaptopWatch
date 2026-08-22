@@ -3,6 +3,7 @@ FastAPI 视频流服务
 """
 import os
 import re
+import asyncio
 from urllib.parse import unquote
 
 from fastapi import FastAPI, Request, Response
@@ -67,7 +68,9 @@ async def _video_generator(filepath: str, start: int, end: int, request: Request
             if await request.is_disconnected():
                 break
             chunk_size = min(VIDEO_CHUNK, remaining)
-            data = fh.read(chunk_size)
+            # 文件读取放到线程池，避免同步 read 阻塞事件循环——
+            # 多个视频流并发时不会互相卡顿（FastAPI 异步的核心收益）
+            data = await asyncio.to_thread(fh.read, chunk_size)
             if not data:
                 break
             remaining -= len(data)

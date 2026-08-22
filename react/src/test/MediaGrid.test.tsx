@@ -127,7 +127,7 @@ describe("MediaGrid", () => {
     fireEvent.click(screen.getByText("video.mp4"));
 
     const location_mock = window.location as unknown as { href: string };
-    expect(location_mock.href).toBe("/media/serve_media/videos%2Fvideo.mp4");
+    expect(location_mock.href).toBe("/media/player?path=videos%2Fvideo.mp4");
   });
 
   it("image click opens the custom player page", async () => {

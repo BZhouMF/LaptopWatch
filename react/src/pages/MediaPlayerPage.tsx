@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, type JSX } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import api_client from "../api/client";
+import { mediaServeUrl, thumbnailUrl } from "../utils/mediaUrl";
 import { usePlayerGestures, type GestureCallbacks } from "../hooks/usePlayerGestures";
 
 // ═══════════════════════════════════════════════════════
@@ -421,7 +422,7 @@ export default function MediaPlayerPage(): JSX.Element {
     }
 
     set_show_video(true);
-    const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
+    const url = mediaServeUrl(media.relative_path);
 
     if (!direction) {
       // First load: load into active slot
@@ -671,7 +672,7 @@ export default function MediaPlayerPage(): JSX.Element {
         if (data.is_video) {
           set_show_video(true);
           set_status("loading");
-          const url = `/media/serve_media/${encodeURIComponent(data.relative_path)}`;
+          const url = mediaServeUrl(data.relative_path);
           load_grid_video(url);
         } else {
           set_show_video(false);
@@ -700,7 +701,7 @@ export default function MediaPlayerPage(): JSX.Element {
     const next_idx = cur_idx + 1;
     if (next_idx < cur_history.length) {
       preload_index_ref.current = next_idx;
-      const url = `/media/serve_media/${encodeURIComponent(cur_history[next_idx].relative_path)}`;
+      const url = mediaServeUrl(cur_history[next_idx].relative_path);
       // 预载下一集到 next 槽位（active+1）
       set_slot_src((active_slot_ref.current + 1) % 3, url);
       return;
@@ -722,7 +723,7 @@ export default function MediaPlayerPage(): JSX.Element {
           preload_index_ref.current = next.length - 1;
           return next;
         });
-        const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
+        const url = mediaServeUrl(resp.data.data.relative_path);
         set_slot_src((active_slot_ref.current + 1) % 3, url);
       }
     } catch { /* ignore */ }
@@ -797,7 +798,7 @@ export default function MediaPlayerPage(): JSX.Element {
       };
       set_current_media(media);
       if (is_vid) {
-        const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
+        const url = mediaServeUrl(media.relative_path);
         load_grid_video(url);
       } else {
         set_status("playing");
@@ -880,7 +881,7 @@ export default function MediaPlayerPage(): JSX.Element {
   const retry_current = useCallback(() => {
     const media = current_media;
     if (!media || !media.is_video) return;
-    const url = `/media/serve_media/${encodeURIComponent(media.relative_path)}`;
+    const url = mediaServeUrl(media.relative_path);
     const active = get_active_video();
     if (active) {
       active.src = url;
@@ -912,7 +913,7 @@ export default function MediaPlayerPage(): JSX.Element {
             if (existing >= 0) return prev;
             return [...prev, resp.data.data];
           });
-          const url = `/media/serve_media/${encodeURIComponent(resp.data.data.relative_path)}`;
+          const url = mediaServeUrl(resp.data.data.relative_path);
           set_slot_src((active_slot_ref.current + 1) % 3, url);
         }
       })
@@ -926,7 +927,7 @@ export default function MediaPlayerPage(): JSX.Element {
     if (direction === "next") {
       const next = history[cur_idx + 1];
       if (next) {
-        const url = `/media/serve_media/${encodeURIComponent(next.relative_path)}`;
+        const url = mediaServeUrl(next.relative_path);
         set_slot_src((active_slot_ref.current + 1) % 3, url);
       } else {
         // 下一集未预载 → 立即拉取
@@ -935,7 +936,7 @@ export default function MediaPlayerPage(): JSX.Element {
     } else {
       const prev = history[cur_idx - 1];
       if (prev) {
-        const url = `/media/serve_media/${encodeURIComponent(prev.relative_path)}`;
+        const url = mediaServeUrl(prev.relative_path);
         set_slot_src((active_slot_ref.current + 2) % 3, url);
       }
     }
@@ -1126,7 +1127,7 @@ export default function MediaPlayerPage(): JSX.Element {
     <video
       ref={ref}
       src={src}
-      poster={src ? src.replace("/media/serve_media/", "/media/thumbnail/") : ""}
+      poster={src ? thumbnailUrl(decodeURIComponent(src.split("/media/serve_media/")[1] || "")) : ""}
       muted={is_muted}
       playsInline
       // 非当前缓冲用 metadata 轻量预载：减少拖动/切换时第二个解码器抢资源导致当前视频卡顿
@@ -1203,7 +1204,7 @@ export default function MediaPlayerPage(): JSX.Element {
       ) : (
         <img
           ref={image_ref}
-          src={current_media ? `/media/serve_media/${encodeURIComponent(current_media.relative_path)}` : ""}
+          src={current_media ? mediaServeUrl(current_media.relative_path) : ""}
           alt={current_media?.name || ""}
           className="absolute inset-0 w-full h-full object-contain"
         />

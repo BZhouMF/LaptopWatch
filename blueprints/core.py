@@ -27,6 +27,7 @@ def api_mode():
         'douyin_random_media': config.DOUYIN_RANDOM_MEDIA,
         'page_first': config.PAGE_FIRST,
         'page_load': config.PAGE_LOAD,
+        'video_port': config.VIDEO_SERVE_PORT,
     }
 
 

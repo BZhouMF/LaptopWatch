@@ -1,11 +1,15 @@
 import { useEffect, useRef } from "react";
 import AppRouter from "./router";
 import api_client from "./api/client";
+import { initVideoPort } from "./utils/mediaUrl";
 
 export default function App() {
   const versionRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // 预取媒体服务端口（FastAPI 5003），避免首次播放时等待
+    initVideoPort();
+
     const interval = setInterval(async () => {
       try {
         const resp = await api_client.get<{
